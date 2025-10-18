@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect , useLayoutEffect} from 'react';
 import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
 import MapView, { Marker } from 'react-native-maps';
 import { collection, onSnapshot, query, where , getDocs, deleteDoc, doc} from 'firebase/firestore';
 import { db } from './firebaseConfig';
@@ -9,8 +10,9 @@ import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
 
 const Tab = createBottomTabNavigator();
+const Stack = createStackNavigator();
 
-function MapScreen() {
+function MapScreen({navigation}) {
   const [location, setLocation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -110,7 +112,33 @@ function MapScreen() {
     } catch (err) {
       console.error("Error clearing old sightings: ", err);
     }
-  }  
+  }
+
+  const handleRefresh = async () => {
+    try {
+      setLoading(true);
+      await requestLocationPermission();
+      await clearOldSightings();
+      setupFirebaseListener();
+      setLoading(false);
+      console.log("🔄 Map refreshed successfully");
+    } catch (error) {
+      console.error("Error refreshing map:", error);
+      setLoading(false);
+      Alert.alert("Error", "Unable to refresh the map right now.");
+    }
+  };
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity onPress={handleRefresh} style={{ marginRight: 15 }}>
+          <Text style={{ fontSize: 32, fontWeight: '700', color: '#007AFF' }}>⟳</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);  
+  
 
   if (loading) {
     return (
@@ -192,8 +220,8 @@ function MapScreen() {
       {/* Stats Bar */}
       <View style={styles.statsBar}>
         <Text style={styles.statsText}>
-          📍 {sightings.filter(s => s.status === 'verified').length} Verified • 
-          ⏳ {sightings.filter(s => s.status === 'pending').length} Pending
+          {sightings.filter(s => s.status === 'verified').length} Verified 
+          {sightings.filter(s => s.status === 'pending').length} Pending
         </Text>
       </View>
     </View>
@@ -203,26 +231,38 @@ function MapScreen() {
 export default function App() {
   return (
     <NavigationContainer>
-      <Tab.Navigator
-        screenOptions={{
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: 'gray',
-          tabBarStyle: {
-            paddingVertical: 5,
-            backgroundColor: 'white',
-          },
-        }}
-      >
-        <Tab.Screen 
-          name="Map" 
-          component={MapScreen}
+        <Tab.Navigator
+          screenOptions={{
+            tabBarActiveTintColor: '#007AFF',
+            tabBarInactiveTintColor: 'gray',
+            tabBarStyle: {
+              paddingVertical: 5,
+              backgroundColor: 'white',
+            },
+          }}
+        >
+
+        <Tab.Screen
+          name="Map"
           options={{
-            title: 'Food Truck Map',
+            headerShown: false,
             tabBarIcon: ({ color, size }) => (
               <Text style={{ fontSize: size, color }}>🗺️</Text>
             ),
+            title: 'Food Truck Map',
           }}
-        />
+        >
+          {() => (
+            <Stack.Navigator>
+              <Stack.Screen
+                name="Food Truck Map"
+                component={MapScreen}
+                options={{ title: "Food Truck Map" }}
+              />
+            </Stack.Navigator>
+          )}
+        </Tab.Screen>
+
         <Tab.Screen 
           name="Report" 
           component={ReportScreen}
@@ -320,5 +360,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     fontWeight: '600',
+  },
+  refreshButton: {
+    position: "absolute",
+    bottom: 80,
+    right: 20,
+    backgroundColor: "#007AFF",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  refreshText: {
+    color: "white",
+    fontWeight: "700",
+    fontSize: 14,
   },
 });
