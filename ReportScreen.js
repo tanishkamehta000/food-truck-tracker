@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import { db } from './firebaseConfig';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 
 const CUISINE_TYPES = [
   'Mexican',
@@ -210,7 +210,7 @@ export default function ReportScreen({ navigation }) {
           longitude: location.longitude,
           address
         },
-        timestamp: new Date().toISOString(),
+        timestamp: serverTimestamp(),
         status: 'pending',
         reporterId: getUserId(),
         confirmationCount: 1 // Start with 1 (this report)

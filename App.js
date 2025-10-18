@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity } fr
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import MapView, { Marker } from 'react-native-maps';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where , getDocs, deleteDoc, doc} from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
@@ -18,6 +18,7 @@ function MapScreen() {
 
   useEffect(() => {
     requestLocationPermission();
+    clearOldSightings();
     setupFirebaseListener();
   }, []);
 
@@ -78,6 +79,38 @@ function MapScreen() {
     if (crowdLevel === 'Moderate') return 'orange';
     return 'blue';
   };
+
+  async function clearOldSightings() {
+    try {
+      const now = new Date();
+  
+      // 5 am cutoff
+      const cutoff = new Date();
+      cutoff.setHours(5, 0, 0, 0);
+  
+      if (now < cutoff) cutoff.setDate(cutoff.getDate() - 1);
+  
+      const snap = await getDocs(collection(db, "sightings"));
+      const deletions = [];
+  
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        const ts = data.timestamp?.toMillis?.() ?? 0;
+        if (ts < cutoff.getTime()) {
+          deletions.push(deleteDoc(doc(db, "sightings", docSnap.id)));
+        }
+      });
+  
+      if (deletions.length > 0) {
+        await Promise.all(deletions);
+        console.log('Cleared ${deletions.length} old sightings before ${cutoff}');
+      } else {
+        console.log("No old sightings to clear.");
+      }
+    } catch (err) {
+      console.error("Error clearing old sightings: ", err);
+    }
+  }  
 
   if (loading) {
     return (
