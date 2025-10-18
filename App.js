@@ -1,10 +1,10 @@
-import React, { useState, useEffect , useLayoutEffect} from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import MapView, { Marker } from 'react-native-maps';
-import { collection, onSnapshot, query, where , getDocs, deleteDoc, doc} from 'firebase/firestore';
+import { collection, onSnapshot, query, getDocs, deleteDoc, doc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
@@ -14,7 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-function MapScreen({navigation}) {
+function MapScreen({ navigation }) {
   const [location, setLocation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -27,35 +27,38 @@ function MapScreen({navigation}) {
   }, []);
 
   const setupFirebaseListener = () => {
-    // Listen for real-time updates from Firebase
     const q = query(collection(db, 'sightings'));
-    
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const sightingsData = [];
-      querySnapshot.forEach((doc) => {
-        sightingsData.push({
-          id: doc.id,
-          ...doc.data()
-        });
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+    
+        // Normalize field names to always include location
+        const latitude = data.location?.latitude ?? data.lat;
+        const longitude = data.location?.longitude ?? data.lon;
+    
+        if (latitude && longitude) {
+          sightingsData.push({
+            id: docSnap.id,
+            ...data,
+            location: { latitude, longitude },
+          });
+        }
       });
+    
+      console.log("🔥 Normalized sightings:", sightingsData);
       setSightings(sightingsData);
-    });
-
+    });      
     return unsubscribe;
-  };
+  };  
 
   const requestLocationPermission = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-    
       if (status !== 'granted') {
         setErrorMsg('Permission to access location was denied');
         setLoading(false);
-        Alert.alert(
-          'Location Permission',
-          'We need your location permission to show you on the map and help you find food trucks nearby.',
-          [{ text: 'OK' }]
-        );
+        Alert.alert('Location Permission', 'We need your location permission to show nearby food trucks.');
         return;
       }
 
@@ -71,50 +74,44 @@ function MapScreen({navigation}) {
       });
       setLoading(false);
     } catch (error) {
+      console.error(error);
       setErrorMsg('Error getting location');
       setLoading(false);
-      console.error(error);
     }
   };
 
   const getMarkerColor = (status, verifiedBy, crowdLevel) => {
     if (verifiedBy === 'vendor') return 'green';
-    if (verifiedBy === 'user') return 'blue';
     if (crowdLevel === 'Busy') return 'red';
     if (crowdLevel === 'Moderate') return 'orange';
     if (crowdLevel === 'Light') return 'yellow';
-    return 'gray'; // default
-  };  
+    return 'gray';
+  };
 
   async function clearOldSightings() {
     try {
       const now = new Date();
-  
-      // 5 am cutoff
       const cutoff = new Date();
       cutoff.setHours(5, 0, 0, 0);
-  
       if (now < cutoff) cutoff.setDate(cutoff.getDate() - 1);
-  
+
       const snap = await getDocs(collection(db, "sightings"));
       const deletions = [];
-  
+
       snap.forEach((docSnap) => {
         const data = docSnap.data();
         const ts = data.timestamp?.toMillis?.() ?? 0;
-        if (ts < cutoff.getTime()) {
+        if (ts < cutoff.getTime() && data.status !== "verified") {
           deletions.push(deleteDoc(doc(db, "sightings", docSnap.id)));
         }
       });
-  
+
       if (deletions.length > 0) {
         await Promise.all(deletions);
-        console.log('Cleared ${deletions.length} old sightings before ${cutoff}');
-      } else {
-        console.log("No old sightings to clear.");
+        console.log(`Cleared ${deletions.length} old sightings`);
       }
     } catch (err) {
-      console.error("Error clearing old sightings: ", err);
+      console.error("Error clearing old sightings:", err);
     }
   }
 
@@ -141,8 +138,7 @@ function MapScreen({navigation}) {
         </TouchableOpacity>
       ),
     });
-  }, [navigation]);  
-  
+  }, [navigation]);
 
   if (loading) {
     return (
@@ -157,9 +153,7 @@ function MapScreen({navigation}) {
     return (
       <View style={styles.errorContainer}>
         <Text style={styles.errorText}>{errorMsg}</Text>
-        <Text style={styles.errorSubtext}>
-          Please enable location permissions in your device settings.
-        </Text>
+        <Text style={styles.errorSubtext}>Please enable location permissions in settings.</Text>
       </View>
     );
   }
@@ -169,47 +163,87 @@ function MapScreen({navigation}) {
       <MapView
         style={styles.map}
         initialRegion={location}
-        showsUserLocation={true}
-        showsMyLocationButton={true}
+        showsUserLocation
+        showsMyLocationButton
       >
-        {/* Your current location marker */}
+        {/* Current user location */}
         {location && (
           <Marker
-            coordinate={{
-              latitude: location.latitude,
-              longitude: location.longitude,
-            }}
+            coordinate={location}
             title="You are here"
             description="Your current location"
             pinColor="purple"
           />
         )}
-        
+
         {/* Food truck sightings */}
-        {sightings.map((sighting) => (
-          <Marker
-            key={sighting.id}
-            coordinate={{
-              latitude: sighting.location.latitude,
-              longitude: sighting.location.longitude,
-            }}
-            title={sighting.foodTruckName}
-            description={`${sighting.cuisineType} • ${sighting.crowdLevel} • ${sighting.status}`}
-            pinColor={getMarkerColor(sighting.status, sighting.verifiedBy, sighting.crowdLevel)}
-          />
-        ))}
+        {sightings
+          .filter((sighting, _, allSightings) => {
+            if (!sighting.location?.latitude || !sighting.location?.longitude) return false;
+
+            // Vendors always show
+            if (sighting.verifiedBy?.toLowerCase() === "vendor") return true;
+
+            // Users need 3+ confirmations nearby
+            const sameTruckSightings = allSightings.filter((s) => {
+              if (!s.location?.latitude || !s.location?.longitude) return false;
+              const distance = Math.sqrt(
+                Math.pow(s.location.latitude - sighting.location.latitude, 2) +
+                Math.pow(s.location.longitude - sighting.location.longitude, 2)
+              );
+              return (
+                s.foodTruckName?.toLowerCase() === sighting.foodTruckName?.toLowerCase() &&
+                distance < 0.001
+              );
+            });
+
+            const verifiedCount = sameTruckSightings.filter(
+              (s) => s.status === "verified"
+            ).length;
+
+            return verifiedCount >= 3;
+          })
+          .map((sighting) => {
+            console.log(
+              "Rendering marker:",
+              sighting.foodTruckName,
+              sighting.verifiedBy,
+              sighting.location
+            );
+
+            return (
+              <Marker
+                key={sighting.id}
+                coordinate={{
+                  latitude: sighting.location.latitude,
+                  longitude: sighting.location.longitude,
+                }}
+                title={sighting.foodTruckName}
+                description={`${sighting.cuisineType} • ${sighting.crowdLevel}`}
+                pinColor={
+                  sighting.verifiedBy?.toLowerCase() === "vendor"
+                    ? "green"
+                    : sighting.crowdLevel === "Busy"
+                    ? "red"
+                    : sighting.crowdLevel === "Moderate"
+                    ? "orange"
+                    : sighting.crowdLevel === "Light"
+                    ? "yellow"
+                    : "gray"
+                }
+              />
+            );
+          })}
+
       </MapView>
-      
-      {/* Map Legend */}
+
+
+      {/* Legend */}
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Map Legend</Text>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'green' }]} />
           <Text style={styles.legendText}>Vendor verified</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: 'blue' }]} />
-          <Text style={styles.legendText}>User verified</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'red' }]} />
@@ -224,14 +258,6 @@ function MapScreen({navigation}) {
           <Text style={styles.legendText}>Light Crowd</Text>
         </View>
       </View>
-
-      {/* Stats Bar */}
-      <View style={styles.statsBar}>
-        <Text style={styles.statsText}>
-          {sightings.filter(s => s.status === 'verified').length} Verified 
-          {sightings.filter(s => s.status === 'pending').length} Pending
-        </Text>
-      </View>
     </View>
   );
 }
@@ -242,47 +268,35 @@ function MainApp() {
       screenOptions={{
         tabBarActiveTintColor: '#007AFF',
         tabBarInactiveTintColor: 'gray',
-        tabBarStyle: {
-          paddingVertical: 5,
-          backgroundColor: 'white',
-        },
+        tabBarStyle: { paddingVertical: 5, backgroundColor: 'white' },
       }}
     >
       <Tab.Screen
         name="Map"
         options={{
           headerShown: false,
-          tabBarIcon: ({ color, size }) => (
-            <Text style={{ fontSize: size, color }}>🗺️</Text>
-          ),
+          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>🗺️</Text>,
           title: 'Food Truck Map',
         }}
       >
         {() => (
           <Stack.Navigator>
-            <Stack.Screen
-              name="Food Truck Map"
-              component={MapScreen}
-              options={{ title: "Food Truck Map" }}
-            />
+            <Stack.Screen name="Food Truck Map" component={MapScreen} options={{ title: "Food Truck Map" }} />
           </Stack.Navigator>
         )}
       </Tab.Screen>
 
-      <Tab.Screen 
-        name="Report" 
+      <Tab.Screen
+        name="Report"
         component={ReportScreen}
         options={{
           title: 'Report Sighting',
-          tabBarIcon: ({ color, size }) => (
-            <Text style={{ fontSize: size, color }}>📝</Text>
-          ),
+          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>📝</Text>,
         }}
       />
     </Tab.Navigator>
   );
 }
-
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -290,7 +304,6 @@ export default function App() {
 
   useEffect(() => {
     const checkUserType = async () => {
-      await AsyncStorage.removeItem("userType");
       const userType = await AsyncStorage.getItem("userType");
       setHasUserType(!!userType);
       setLoading(false);
@@ -317,44 +330,10 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  map: {
-    width: '100%',
-    height: '100%',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 20,
-  },
-  errorText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#e74c3c',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  errorSubtext: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#fff' },
+  map: { width: '100%', height: '100%' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 10, fontSize: 16, color: '#666' },
   legend: {
     position: 'absolute',
     top: 10,
@@ -366,55 +345,8 @@ const styles = StyleSheet.create({
     borderColor: '#ddd',
     minWidth: 120,
   },
-  legendTitle: {
-    fontWeight: 'bold',
-    marginBottom: 5,
-    fontSize: 12,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 3,
-  },
-  legendColor: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 5,
-  },
-  legendText: {
-    fontSize: 10,
-  },
-  statsBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    padding: 10,
-  },
-  statsText: {
-    color: 'white',
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  refreshButton: {
-    position: "absolute",
-    bottom: 80,
-    right: 20,
-    backgroundColor: "#007AFF",
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  refreshText: {
-    color: "white",
-    fontWeight: "700",
-    fontSize: 14,
-  },
+  legendTitle: { fontWeight: 'bold', marginBottom: 5, fontSize: 12 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
+  legendColor: { width: 12, height: 12, borderRadius: 6, marginRight: 5 },
+  legendText: { fontSize: 10 },
 });

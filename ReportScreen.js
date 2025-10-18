@@ -205,7 +205,13 @@ export default function ReportScreen({ navigation }) {
 
     try {
       // Find similar recent sightings
+      let currentUserType = userType;
+      if (!currentUserType) {
+        currentUserType = await AsyncStorage.getItem("userType");
+        setUserType(currentUserType);
+      }
       const similarSightings = await findSimilarSightings(foodTruckName.trim(), location);
+      const isVendor = userType === "vendor";
 
       // Create the new report
       const report = {
@@ -219,7 +225,7 @@ export default function ReportScreen({ navigation }) {
           address
         },
         timestamp: serverTimestamp(),
-        status: 'pending',
+        status: isVendor ? "verified" : "pending",
         reporterEmail: userEmail,
         confirmationCount: 1, // Start with 1 (this report)
         verifiedBy: userType,
@@ -232,7 +238,21 @@ export default function ReportScreen({ navigation }) {
       // Check if we've reached the verification threshold
       const allSightings = [...similarSightings, { id: docRef.id, ...report }];
       
-      if (allSightings.length >= 3) {
+      if (isVendor) {
+        Alert.alert(
+          'Vendor Report Verified!',
+          `${foodTruckName} has been added as a verified truck on the map.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                navigation.navigate('Map');
+                resetForm();
+              }
+            }
+          ]
+        );
+      } else if (allSightings.length >= 3) {
         // We have 3 or more confirmations - verify these sightings
         await verifySighting(allSightings.map(s => s.id));
         
