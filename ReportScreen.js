@@ -13,6 +13,7 @@ import {
 import * as Location from 'expo-location';
 import { db } from './firebaseConfig';
 import { collection, addDoc, query, where, getDocs, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const CUISINE_TYPES = [
   'Mexican',
@@ -31,11 +32,6 @@ const CUISINE_TYPES = [
   'Other'
 ];
 
-// Helper function to generate a unique user ID (in real app, use authentication)
-const getUserId = () => {
-  return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-};
-
 export default function ReportScreen({ navigation }) {
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState('');
@@ -45,10 +41,22 @@ export default function ReportScreen({ navigation }) {
   const [additionalNotes, setAdditionalNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [locationLoading, setLocationLoading] = useState(true);
+  const [userType, setUserType] = useState(null);
+  const [userEmail, setUserEmail] = useState("");
 
   useEffect(() => {
     getCurrentLocation();
+  
+    const loadUserInfo = async () => {
+      const type = await AsyncStorage.getItem("userType");
+      const email = await AsyncStorage.getItem("userEmail");
+      setUserType(type || "user");
+      setUserEmail(email || "");
+    };
+  
+    loadUserInfo();
   }, []);
+  
 
   const showCuisineActionSheet = () => {
     ActionSheetIOS.showActionSheetWithOptions(
@@ -198,7 +206,7 @@ export default function ReportScreen({ navigation }) {
     try {
       // Find similar recent sightings
       const similarSightings = await findSimilarSightings(foodTruckName.trim(), location);
-      
+
       // Create the new report
       const report = {
         foodTruckName: foodTruckName.trim(),
@@ -212,13 +220,14 @@ export default function ReportScreen({ navigation }) {
         },
         timestamp: serverTimestamp(),
         status: 'pending',
-        reporterId: getUserId(),
-        confirmationCount: 1 // Start with 1 (this report)
+        reporterEmail: userEmail,
+        confirmationCount: 1, // Start with 1 (this report)
+        verifiedBy: userType,
       };
 
       // Add the new report to Firebase
-      const docRef = await addDoc(collection(db, 'sightings'), report);
-      console.log('Report submitted with ID: ', docRef.id);
+      const docRef = await addDoc(collection(db, "sightings"), report);
+      console.log("Report submitted with ID:", docRef.id);
 
       // Check if we've reached the verification threshold
       const allSightings = [...similarSightings, { id: docRef.id, ...report }];

@@ -8,6 +8,8 @@ import { collection, onSnapshot, query, where , getDocs, deleteDoc, doc} from 'f
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
+import LoginScreen from "./LoginScreen";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -75,12 +77,14 @@ function MapScreen({navigation}) {
     }
   };
 
-  const getMarkerColor = (status, crowdLevel) => {
-    if (status === 'verified') return 'green';
+  const getMarkerColor = (status, verifiedBy, crowdLevel) => {
+    if (verifiedBy === 'vendor') return 'green';
+    if (verifiedBy === 'user') return 'blue';
     if (crowdLevel === 'Busy') return 'red';
     if (crowdLevel === 'Moderate') return 'orange';
-    return 'blue';
-  };
+    if (crowdLevel === 'Light') return 'yellow';
+    return 'gray'; // default
+  };  
 
   async function clearOldSightings() {
     try {
@@ -191,7 +195,7 @@ function MapScreen({navigation}) {
             }}
             title={sighting.foodTruckName}
             description={`${sighting.cuisineType} • ${sighting.crowdLevel} • ${sighting.status}`}
-            pinColor={getMarkerColor(sighting.status, sighting.crowdLevel)}
+            pinColor={getMarkerColor(sighting.status, sighting.verifiedBy, sighting.crowdLevel)}
           />
         ))}
       </MapView>
@@ -201,7 +205,11 @@ function MapScreen({navigation}) {
         <Text style={styles.legendTitle}>Map Legend</Text>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'green' }]} />
-          <Text style={styles.legendText}>Verified</Text>
+          <Text style={styles.legendText}>Vendor verified</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendColor, { backgroundColor: 'blue' }]} />
+          <Text style={styles.legendText}>User verified</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'red' }]} />
@@ -212,7 +220,7 @@ function MapScreen({navigation}) {
           <Text style={styles.legendText}>Moderate</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: 'blue' }]} />
+          <View style={[styles.legendColor, { backgroundColor: 'yellow' }]} />
           <Text style={styles.legendText}>Light Crowd</Text>
         </View>
       </View>
@@ -228,52 +236,82 @@ function MapScreen({navigation}) {
   );
 }
 
+function MainApp() {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        tabBarActiveTintColor: '#007AFF',
+        tabBarInactiveTintColor: 'gray',
+        tabBarStyle: {
+          paddingVertical: 5,
+          backgroundColor: 'white',
+        },
+      }}
+    >
+      <Tab.Screen
+        name="Map"
+        options={{
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => (
+            <Text style={{ fontSize: size, color }}>🗺️</Text>
+          ),
+          title: 'Food Truck Map',
+        }}
+      >
+        {() => (
+          <Stack.Navigator>
+            <Stack.Screen
+              name="Food Truck Map"
+              component={MapScreen}
+              options={{ title: "Food Truck Map" }}
+            />
+          </Stack.Navigator>
+        )}
+      </Tab.Screen>
+
+      <Tab.Screen 
+        name="Report" 
+        component={ReportScreen}
+        options={{
+          title: 'Report Sighting',
+          tabBarIcon: ({ color, size }) => (
+            <Text style={{ fontSize: size, color }}>📝</Text>
+          ),
+        }}
+      />
+    </Tab.Navigator>
+  );
+}
+
+
 export default function App() {
+  const [loading, setLoading] = useState(true);
+  const [hasUserType, setHasUserType] = useState(false);
+
+  useEffect(() => {
+    const checkUserType = async () => {
+      await AsyncStorage.removeItem("userType");
+      const userType = await AsyncStorage.getItem("userType");
+      setHasUserType(!!userType);
+      setLoading(false);
+    };
+    checkUserType();
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer>
-        <Tab.Navigator
-          screenOptions={{
-            tabBarActiveTintColor: '#007AFF',
-            tabBarInactiveTintColor: 'gray',
-            tabBarStyle: {
-              paddingVertical: 5,
-              backgroundColor: 'white',
-            },
-          }}
-        >
-
-        <Tab.Screen
-          name="Map"
-          options={{
-            headerShown: false,
-            tabBarIcon: ({ color, size }) => (
-              <Text style={{ fontSize: size, color }}>🗺️</Text>
-            ),
-            title: 'Food Truck Map',
-          }}
-        >
-          {() => (
-            <Stack.Navigator>
-              <Stack.Screen
-                name="Food Truck Map"
-                component={MapScreen}
-                options={{ title: "Food Truck Map" }}
-              />
-            </Stack.Navigator>
-          )}
-        </Tab.Screen>
-
-        <Tab.Screen 
-          name="Report" 
-          component={ReportScreen}
-          options={{
-            title: 'Report Sighting',
-            tabBarIcon: ({ color, size }) => (
-              <Text style={{ fontSize: size, color }}>📝</Text>
-            ),
-          }}
-        />
-      </Tab.Navigator>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="MainApp" component={MainApp} />
+      </Stack.Navigator>
     </NavigationContainer>
   );
 }
