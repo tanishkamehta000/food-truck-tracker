@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity } fr
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import MapView, { Marker } from 'react-native-maps';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
@@ -15,6 +15,7 @@ function MapScreen() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   const [sightings, setSightings] = useState([]);
+  const [mapRegion, setMapRegion] = useState(null);
 
   useEffect(() => {
     requestLocationPermission();
@@ -22,18 +23,25 @@ function MapScreen() {
   }, []);
 
   const setupFirebaseListener = () => {
-    // Listen for real-time updates from Firebase
+    // Listen for ALL sightings (both pending and verified)
     const q = query(collection(db, 'sightings'));
     
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const sightingsData = [];
       querySnapshot.forEach((doc) => {
+        const data = doc.data();
         sightingsData.push({
           id: doc.id,
-          ...doc.data()
+          ...data
         });
       });
+      
       setSightings(sightingsData);
+      
+      // Debug logging
+      console.log('🔄 Firebase update - Total sightings:', sightingsData.length);
+      console.log('✅ Verified:', sightingsData.filter(s => s.status === 'verified').length);
+      console.log('⏳ Pending:', sightingsData.filter(s => s.status === 'pending').length);
     });
 
     return unsubscribe;
@@ -58,12 +66,15 @@ function MapScreen() {
         accuracy: Location.Accuracy.Balanced,
       });
 
-      setLocation({
+      const userRegion = {
         latitude: currentLocation.coords.latitude,
         longitude: currentLocation.coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      };
+      
+      setLocation(currentLocation.coords);
+      setMapRegion(userRegion);
       setLoading(false);
     } catch (error) {
       setErrorMsg('Error getting location');
@@ -74,9 +85,17 @@ function MapScreen() {
 
   const getMarkerColor = (status, crowdLevel) => {
     if (status === 'verified') return 'green';
+    if (status === 'pending') return 'gray'; // Add gray for pending markers
     if (crowdLevel === 'Busy') return 'red';
     if (crowdLevel === 'Moderate') return 'orange';
     return 'blue';
+  };
+
+  const getMarkerDescription = (sighting) => {
+    if (sighting.status === 'pending') {
+      return `${sighting.cuisineType} • ${sighting.crowdLevel} • ⏳ Pending Verification`;
+    }
+    return `${sighting.cuisineType} • ${sighting.crowdLevel} • ✅ Verified`;
   };
 
   if (loading) {
@@ -103,7 +122,7 @@ function MapScreen() {
     <View style={styles.container}>
       <MapView
         style={styles.map}
-        initialRegion={location}
+        region={mapRegion}
         showsUserLocation={true}
         showsMyLocationButton={true}
       >
@@ -120,7 +139,7 @@ function MapScreen() {
           />
         )}
         
-        {/* Food truck sightings */}
+        {/* Food truck sightings - BOTH pending and verified */}
         {sightings.map((sighting) => (
           <Marker
             key={sighting.id}
@@ -129,18 +148,22 @@ function MapScreen() {
               longitude: sighting.location.longitude,
             }}
             title={sighting.foodTruckName}
-            description={`${sighting.cuisineType} • ${sighting.crowdLevel} • ${sighting.status}`}
+            description={getMarkerDescription(sighting)}
             pinColor={getMarkerColor(sighting.status, sighting.crowdLevel)}
           />
         ))}
       </MapView>
       
-      {/* Map Legend */}
+      {/* Updated Map Legend */}
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Map Legend</Text>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'green' }]} />
           <Text style={styles.legendText}>Verified</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendColor, { backgroundColor: 'gray' }]} />
+          <Text style={styles.legendText}>Pending</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'red' }]} />
@@ -156,11 +179,12 @@ function MapScreen() {
         </View>
       </View>
 
-      {/* Stats Bar */}
+      {/* Updated Stats Bar */}
       <View style={styles.statsBar}>
         <Text style={styles.statsText}>
-          📍 {sightings.filter(s => s.status === 'verified').length} Verified • 
-          ⏳ {sightings.filter(s => s.status === 'pending').length} Pending
+          {sightings.filter(s => s.status === 'verified').length} Verified • 
+          {sightings.filter(s => s.status === 'pending').length} Pending •
+          Total: {sightings.length}
         </Text>
       </View>
     </View>
@@ -180,8 +204,8 @@ export default function App() {
           },
         }}
       >
-        <Tab.Screen 
-          name="Map" 
+        <Tab.Screen
+          name="Map"
           component={MapScreen}
           options={{
             title: 'Food Truck Map',
@@ -190,8 +214,8 @@ export default function App() {
             ),
           }}
         />
-        <Tab.Screen 
-          name="Report" 
+        <Tab.Screen
+          name="Report"
           component={ReportScreen}
           options={{
             title: 'Report Sighting',
@@ -253,7 +277,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#ddd',
-    minWidth: 120,
+    minWidth: 130,
   },
   legendTitle: {
     fontWeight: 'bold',
