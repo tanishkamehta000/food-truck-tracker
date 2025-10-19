@@ -13,6 +13,7 @@ import {
 import * as Location from 'expo-location';
 import { db } from './firebaseConfig';
 import { collection, addDoc, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const CUISINE_TYPES = [
   'Mexican',
@@ -31,11 +32,6 @@ const CUISINE_TYPES = [
   'Other'
 ];
 
-// Helper function to generate a unique user ID (in real app, use authentication)
-const getUserId = () => {
-  return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-};
-
 export default function ReportScreen({ navigation }) {
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState('');
@@ -45,10 +41,22 @@ export default function ReportScreen({ navigation }) {
   const [additionalNotes, setAdditionalNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [locationLoading, setLocationLoading] = useState(true);
+  const [userType, setUserType] = useState(null);
+  const [userEmail, setUserEmail] = useState("");
 
   useEffect(() => {
     getCurrentLocation();
+  
+    const loadUserInfo = async () => {
+      const type = await AsyncStorage.getItem("userType");
+      const email = await AsyncStorage.getItem("userEmail");
+      setUserType(type || "user");
+      setUserEmail(email || "");
+    };
+  
+    loadUserInfo();
   }, []);
+  
 
   const showCuisineActionSheet = () => {
     ActionSheetIOS.showActionSheetWithOptions(
@@ -98,7 +106,7 @@ export default function ReportScreen({ navigation }) {
     }
   };
 
-  // Check for nearby similar reports to group them
+  // Check for nearby similar reports to group them - FIXED VERSION
   const findSimilarSightings = async (truckName, userLocation) => {
     try {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
@@ -106,16 +114,29 @@ export default function ReportScreen({ navigation }) {
       const sightingsRef = collection(db, 'sightings');
       const q = query(
         sightingsRef,
-        where('foodTruckName', '==', truckName),      // equality first
-        where('status', '==', 'pending'),             // equality second  
-        where('timestamp', '>=', oneHourAgo.toISOString()) // range LAST
+        where('foodTruckName', '==', truckName)
+        // REMOVED status filter to check for already verified trucks
       );
-
+  
       const querySnapshot = await getDocs(q);
       const similarSightings = [];
-
+  
       querySnapshot.forEach((doc) => {
         const sighting = doc.data();
+        
+        // Manual timestamp filtering to handle both timestamp formats
+        let sightingTime;
+        if (sighting.timestamp && sighting.timestamp.toDate) {
+          // It's a serverTimestamp
+          sightingTime = sighting.timestamp.toDate();
+        } else {
+          // It's a regular timestamp string
+          sightingTime = new Date(sighting.timestamp);
+        }
+        
+        // Skip if older than 1 hour or invalid timestamp
+        if (!sightingTime || sightingTime < oneHourAgo) return;
+        
         // Calculate distance between locations
         const distance = calculateDistance(
           userLocation.latitude,
@@ -123,7 +144,7 @@ export default function ReportScreen({ navigation }) {
           sighting.location.latitude,
           sighting.location.longitude
         );
-
+  
         // If within 100 meters, consider it similar
         if (distance < 100) {
           similarSightings.push({
@@ -132,7 +153,14 @@ export default function ReportScreen({ navigation }) {
           });
         }
       });
-
+  
+      // DEBUG LOGGING
+      console.log('🔍 Found similar sightings:', similarSightings.length);
+      console.log('📊 Status breakdown:', {
+        verified: similarSightings.filter(s => s.status === 'verified').length,
+        pending: similarSightings.filter(s => s.status === 'pending').length
+      });
+      
       return similarSightings;
     } catch (error) {
       console.error('Error finding similar sightings:', error);
@@ -166,65 +194,180 @@ export default function ReportScreen({ navigation }) {
       );
 
       await Promise.all(updatePromises);
-      console.log(`Verified ${sightingIds.length} sightings`);
+      console.log(`✅ Verified ${sightingIds.length} sightings`);
     } catch (error) {
       console.error('Error verifying sightings:', error);
     }
   };
+
+   // For testing multiple users
+const simulateMultipleUsers = async () => {
+  if (!foodTruckName.trim() || !cuisineType || !crowdLevel || !location) {
+    Alert.alert('Missing Information', 'Please fill out the form first');
+    return;
+  }
+
+  console.log('🧪 Simulating 3 different users reporting the same truck...');
+  
+  // Simulate 3 different users
+  for (let i = 1; i <= 3; i++) {
+    const testReport = {
+      foodTruckName: foodTruckName.trim(),
+      cuisineType,
+      crowdLevel,
+      additionalNotes: `Test report from user ${i}`,
+      location: {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        address
+      },
+      timestamp: new Date().toISOString(),
+      status: "pending",
+      reporterEmail: `testuser${i}@example.com`,
+      reporterId: `test_user_${i}_${Date.now()}`,
+      confirmationCount: 1,
+      verifiedBy: "user",
+    };
+
+    try {
+      await addDoc(collection(db, "sightings"), testReport);
+      console.log(`✅ Added test report from user ${i}`);
+    } catch (error) {
+      console.error(`❌ Error adding test report ${i}:`, error);
+    }
+  }
+  
+  Alert.alert(
+    'Test Data Added',
+    '3 test reports from different users have been added. Now submit your own report to trigger verification.',
+    [{ text: 'OK' }]
+  );
+};
 
   const handleSubmit = async () => {
     if (!foodTruckName.trim()) {
       Alert.alert('Missing Information', 'Please enter the food truck name');
       return;
     }
-
+  
     if (!cuisineType) {
       Alert.alert('Missing Information', 'Please select a cuisine type');
       return;
     }
-
+  
     if (!crowdLevel) {
       Alert.alert('Missing Information', 'Please select crowd level');
       return;
     }
-
+  
     if (!location) {
       Alert.alert('Error', 'Location is required');
       return;
     }
-
+  
     setLoading(true);
-
+  
     try {
       // Find similar recent sightings
-      const similarSightings = await findSimilarSightings(foodTruckName.trim(), location);
+      let currentUserType = userType;
+      if (!currentUserType) {
+        currentUserType = await AsyncStorage.getItem("userType");
+        setUserType(currentUserType);
+      }
       
-      // Create the new report
+      console.log('🔍 Searching for similar sightings...');
+      const similarSightings = await findSimilarSightings(foodTruckName.trim(), location);
+      const isVendor = userType === "vendor";
+  
+      // Check if this food truck is already verified
+      const alreadyVerified = similarSightings.some(sighting => sighting.status === 'verified');
+      
+      if (alreadyVerified) {
+        Alert.alert(
+          'Already Verified!',
+          `${foodTruckName} is already verified on the map.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                navigation.navigate('Map');
+                resetForm();
+              }
+            }
+          ]
+        );
+        setLoading(false);
+        return;
+      }
+  
+      // Create a unique user identifier for testing
+      const uniqueUserId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Create the new report - ensure consistent location structure
       const report = {
         foodTruckName: foodTruckName.trim(),
         cuisineType,
         crowdLevel,
         additionalNotes: additionalNotes.trim(),
-        location: {
+        location: { // Always use this structure
           latitude: location.latitude,
           longitude: location.longitude,
           address
         },
         timestamp: new Date().toISOString(),
-        status: 'pending',
-        reporterId: getUserId(),
-        confirmationCount: 1 // Start with 1 (this report)
-      };
-
+        status: isVendor ? "verified" : "pending",
+        reporterEmail: userEmail || uniqueUserId,
+        reporterId: uniqueUserId,
+        confirmationCount: 1,
+        verifiedBy: userType,
+};
+  
       // Add the new report to Firebase
-      const docRef = await addDoc(collection(db, 'sightings'), report);
-      console.log('Report submitted with ID: ', docRef.id);
-
+      const docRef = await addDoc(collection(db, "sightings"), report);
+      console.log("📝 Report submitted with ID:", docRef.id);
+  
       // Check if we've reached the verification threshold
       const allSightings = [...similarSightings, { id: docRef.id, ...report }];
       
-      if (allSightings.length >= 3) {
-        // We have 3 or more confirmations - verify these sightings
+      // Count unique reporters for verification (not just total reports)
+      const uniqueReporters = new Set();
+      allSightings.forEach(sighting => {
+        // Use reporterId if available, otherwise fall back to reporterEmail
+        const reporterIdentifier = sighting.reporterId || sighting.reporterEmail;
+        if (reporterIdentifier) {
+          uniqueReporters.add(reporterIdentifier);
+        }
+      });
+      
+      const uniqueReporterCount = uniqueReporters.size;
+      
+      // DEBUG: Log all reporters
+      console.log('👥 All unique reporters:', Array.from(uniqueReporters));
+      console.log('📊 Unique reporter count:', uniqueReporterCount, 'out of', allSightings.length, 'total reports');
+      console.log('🔍 All sightings details:', allSightings.map(s => ({
+        id: s.id,
+        reporterId: s.reporterId,
+        reporterEmail: s.reporterEmail,
+        status: s.status
+      })));
+  
+      if (isVendor) {
+        Alert.alert(
+          'Vendor Report Verified!',
+          `${foodTruckName} has been added as a verified truck on the map.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                navigation.navigate('Map');
+                resetForm();
+              }
+            }
+          ]
+        );
+      } else if (uniqueReporterCount >= 3) {
+        // We have 3 or more UNIQUE confirmations - verify these sightings
+        console.log('🎉 Reached 3 unique confirmations! Verifying sightings...');
         await verifySighting(allSightings.map(s => s.id));
         
         Alert.alert(
@@ -242,10 +385,11 @@ export default function ReportScreen({ navigation }) {
         );
       } else {
         // Not enough confirmations yet
-        const needed = 3 - allSightings.length;
+        const needed = 3 - uniqueReporterCount;
+        console.log('⏳ Need more unique confirmations:', needed, 'more needed');
         Alert.alert(
           'Success!',
-          `Food truck reported successfully. Need ${needed} more confirmation${needed > 1 ? 's' : ''} to verify.`,
+          `Food truck reported successfully. Need ${needed} more unique confirmation${needed > 1 ? 's' : ''} to verify.`,
           [
             {
               text: 'OK',
@@ -257,14 +401,16 @@ export default function ReportScreen({ navigation }) {
           ]
         );
       }
-
+  
     } catch (error) {
-      console.error('Error submitting report:', error);
+      console.error('❌ Error submitting report:', error);
       Alert.alert('Error', 'Failed to submit report. Please try again.');
     } finally {
       setLoading(false);
     }
   };
+
+
 
   const resetForm = () => {
     setFoodTruckName('');
@@ -371,6 +517,14 @@ export default function ReportScreen({ navigation }) {
           </Text>
         </Text>
       </View>
+
+            {/* Add this temporary test button - remove after testing */}
+            <TouchableOpacity
+        style={[styles.submitButton, { backgroundColor: '#FF9500', marginBottom: 10 }]}
+        onPress={simulateMultipleUsers}
+      >
+        <Text style={styles.submitButtonText}>🧪 Simulate 3 Users (Test)</Text>
+      </TouchableOpacity>
 
       <TouchableOpacity
         style={[styles.submitButton, loading && styles.submitButtonDisabled]}
