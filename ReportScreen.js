@@ -676,4 +676,49 @@ const simulateMultipleUsers = async () => {
       )}
     </TouchableOpacity>
   </ScrollView>
-)
+);
+}
+
+const styles = StyleSheet.create({
+  // ... all your existing styles ...
+  
+  // ADD THESE NEW STYLES:
+  vendorInfoBanner: {
+    backgroundColor: '#fff3cd',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9500',
+  },
+  vendorInfoLabel: {
+    fontSize: 14,
+    color: '#856404',
+    marginBottom: 4,
+  },
+  vendorTruckName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FF9500',
+    marginBottom: 4,
+  },
+  vendorInfoSubtext: {
+    fontSize: 13,
+    color: '#856404',
+  },
+  vendorAccent: {
+    color: '#FF9500',
+  },
+  vendorButtonSelected: {
+    backgroundColor: '#FF9500',
+    borderColor: '#FF9500',
+  },
+  vendorVerificationSection: {
+    backgroundColor: '#e7f8ef',
+    borderLeftWidth: 4,
+    borderLeftColor: '#28a745',
+  },
+  vendorSubmitButton: {
+    backgroundColor: '#FF9500',
+  },
+});
