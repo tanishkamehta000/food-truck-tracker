@@ -680,9 +680,151 @@ const simulateMultipleUsers = async () => {
 }
 
 const styles = StyleSheet.create({
-  // ... all your existing styles ...
-  
-  // ADD THESE NEW STYLES:
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
+  section: {
+    marginBottom: 24,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+    color: '#333',
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f8f9fa',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  locationText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+  },
+  changeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  changeButtonText: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
+  },
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  cuisineSelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: '#fff',
+  },
+  cuisineSelectorText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  cuisineSelectorPlaceholder: {
+    fontSize: 16,
+    color: '#999',
+  },
+  cuisineSelectorArrow: {
+    fontSize: 12,
+    color: '#666',
+  },
+  selectedCuisineText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#007AFF',
+    fontStyle: 'italic',
+  },
+  crowdLevelContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  crowdLevelButton: {
+    flex: 1,
+    padding: 12,
+    marginHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  crowdLevelButtonSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  crowdLevelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  crowdLevelTextSelected: {
+    color: '#fff',
+  },
+  verificationSection: {
+    backgroundColor: '#f8f9fa',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 24,
+  },
+  verificationText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  verificationBold: {
+    fontWeight: '600',
+    color: '#333',
+  },
+  submitButton: {
+    backgroundColor: '#007AFF',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
   vendorInfoBanner: {
     backgroundColor: '#fff3cd',
     padding: 16,
