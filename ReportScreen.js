@@ -32,6 +32,10 @@ const CUISINE_TYPES = [
   'Other'
 ];
 
+//confirmed working as of today 
+
+const INVENTORY_LEVELS = ['Plenty', 'Running Low', 'Almost Out'];
+
 export default function ReportScreen({ navigation }) {
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState('');
@@ -43,6 +47,9 @@ export default function ReportScreen({ navigation }) {
   const [locationLoading, setLocationLoading] = useState(true);
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState("");
+  const [inventoryLevel, setInventoryLevel] = useState('');
+  const [vendorProfile, setVendorProfile] = useState(null); //both of these are for inventory level and vendor profile
+
 
   useEffect(() => {
     getCurrentLocation();
@@ -52,11 +59,46 @@ export default function ReportScreen({ navigation }) {
       const email = await AsyncStorage.getItem("userEmail");
       setUserType(type || "user");
       setUserEmail(email || "");
+
+
+      if (type == "vendor" && email) {
+        await loadVendorProfile(email);
+      }
     };
   
     loadUserInfo();
   }, []);
-  
+
+
+  //adding a new load vendor profile method
+  const loadVendorProfile = async (email) => {
+    try {
+      const vendorsRef = collection(db, 'vendors');
+      const q = query(vendorsRef, where('email', '==', email));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const vendorData = querySnapshot.docs[0].data();
+        setVendorProfile(vendorData);
+        // Auto-fill truck info from profile
+        setFoodTruckName(vendorData.truckName || '');
+        setCuisineType(vendorData.cuisineType || '');
+        console.log('✅ Loaded vendor profile:', vendorData);
+      } else {
+        console.log('⚠️ No vendor profile found for:', email);
+        // TODO: Prompt vendor to create profile
+        Alert.alert(
+          'Profile Setup Required',
+          'Please set up your food truck profile first.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error loading vendor profile:', error);
+    }
+  };
+
+
 
   const showCuisineActionSheet = () => {
     ActionSheetIOS.showActionSheetWithOptions(
@@ -245,25 +287,41 @@ const simulateMultipleUsers = async () => {
 };
 
   const handleSubmit = async () => {
-    if (!foodTruckName.trim()) {
-      Alert.alert('Missing Information', 'Please enter the food truck name');
-      return;
-    }
-  
-    if (!cuisineType) {
-      Alert.alert('Missing Information', 'Please select a cuisine type');
-      return;
-    }
-  
-    if (!crowdLevel) {
-      Alert.alert('Missing Information', 'Please select crowd level');
-      return;
-    }
-  
-    if (!location) {
-      Alert.alert('Error', 'Location is required');
-      return;
-    }
+    //added seperate case for isVendor
+
+    const isVendor = userType === "vendor";
+
+    if (isVendor) {
+      // basically vendors only need location
+      if (!location) {
+        Alert.alert('Error', 'Location is required');
+        return;
+      }
+      if (!foodTruckName.trim() || !cuisineType) {
+        Alert.alert('Error', 'Vendor profile incomplete. Please contact support.');
+        return;
+      }
+    } else {
+      if (!foodTruckName.trim()) {
+        Alert.alert('Missing Information', 'Please enter the food truck name');
+        return;
+      }
+    
+      if (!cuisineType) {
+        Alert.alert('Missing Information', 'Please select a cuisine type');
+        return;
+      }
+    
+      if (!crowdLevel) {
+        Alert.alert('Missing Information', 'Please select crowd level');
+        return;
+      }
+    
+      if (!location) {
+        Alert.alert('Error', 'Location is required');
+        return;
+      }
+  }
   
     setLoading(true);
   
@@ -307,7 +365,8 @@ const simulateMultipleUsers = async () => {
       const report = {
         foodTruckName: foodTruckName.trim(),
         cuisineType,
-        crowdLevel,
+        crowdLevel: crowdLevel || (isVendor ? 'Light' : ''),
+        inventoryLevel: isVendor ? inventoryLevel : null,
         additionalNotes: additionalNotes.trim(),
         location: { // Always use this structure
           latitude: location.latitude,
@@ -325,7 +384,26 @@ const simulateMultipleUsers = async () => {
       // Add the new report to Firebase
       const docRef = await addDoc(collection(db, "sightings"), report);
       console.log("📝 Report submitted with ID:", docRef.id);
-  
+
+      //new path for vendor
+      if (isVendor) {
+        Alert.alert(
+          '✅ Check-In Successful!',
+          `${foodTruckName} is now live on the map and visible to customers!`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                navigation.navigate('Map');
+                resetForm();
+              }
+            }
+          ]
+        );
+        setLoading(false);
+        return;
+      }
+
       // Check if we've reached the verification threshold
       const allSightings = [...similarSightings, { id: docRef.id, ...report }];
       
@@ -351,21 +429,7 @@ const simulateMultipleUsers = async () => {
         status: s.status
       })));
   
-      if (isVendor) {
-        Alert.alert(
-          'Vendor Report Verified!',
-          `${foodTruckName} has been added as a verified truck on the map.`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                navigation.navigate('Map');
-                resetForm();
-              }
-            }
-          ]
-        );
-      } else if (uniqueReporterCount >= 3) {
+      if (uniqueReporterCount >= 3) {
         // We have 3 or more UNIQUE confirmations - verify these sightings
         console.log('🎉 Reached 3 unique confirmations! Verifying sightings...');
         await verifySighting(allSightings.map(s => s.id));
@@ -413,9 +477,13 @@ const simulateMultipleUsers = async () => {
 
 
   const resetForm = () => {
-    setFoodTruckName('');
-    setCuisineType('');
+    if (userType != "vendor") {
+      setFoodTruckName('');
+      setCuisineType('');
+    }
+
     setCrowdLevel('');
+    setInventoryLevel('');
     setAdditionalNotes('');
   };
 
@@ -428,63 +496,83 @@ const simulateMultipleUsers = async () => {
     );
   }
 
+  const isVendor = userType == "vendor";
+
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.section}>
-        <Text style={styles.label}>Current Location</Text>
-        <View style={styles.locationContainer}>
-          <Text style={styles.locationText}>{address}</Text>
-          <TouchableOpacity style={styles.changeButton} onPress={getCurrentLocation}>
-            <Text style={styles.changeButtonText}>Refresh</Text>
-          </TouchableOpacity>
-        </View>
+  <ScrollView style={styles.container}>
+    {/* NEW: Vendor info banner */}
+    {isVendor && vendorProfile && (
+      <View style={styles.vendorInfoBanner}>
+        <Text style={styles.vendorInfoLabel}>Checking in as:</Text>
+        <Text style={styles.vendorTruckName}>🚚 {vendorProfile.truckName}</Text>
+        <Text style={styles.vendorInfoSubtext}>
+          {vendorProfile.cuisineType} • {vendorProfile.location || 'Atlanta'}
+        </Text>
       </View>
+    )}
 
-      <View style={styles.section}>
-        <Text style={styles.label}>Food Truck Name *</Text>
-        <TextInput
-          style={styles.textInput}
-          placeholder="e.g., Joe's Tacos, Burger Express..."
-          value={foodTruckName}
-          onChangeText={setFoodTruckName}
-          maxLength={50}
-        />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.label}>Cuisine Type *</Text>
-        <TouchableOpacity 
-          style={styles.cuisineSelector}
-          onPress={showCuisineActionSheet}
-        >
-          <Text style={cuisineType ? styles.cuisineSelectorText : styles.cuisineSelectorPlaceholder}>
-            {cuisineType || 'Select cuisine type'}
-          </Text>
-          <Text style={styles.cuisineSelectorArrow}>▼</Text>
+    <View style={styles.section}>
+      <Text style={styles.label}>Current Location</Text>
+      <View style={styles.locationContainer}>
+        <Text style={styles.locationText}>{address}</Text>
+        <TouchableOpacity style={styles.changeButton} onPress={getCurrentLocation}>
+          <Text style={[styles.changeButtonText, isVendor && styles.vendorAccent]}>Refresh</Text>
         </TouchableOpacity>
-        {cuisineType ? (
-          <Text style={styles.selectedCuisineText}>
-            Selected: {cuisineType}
-          </Text>
-        ) : null}
       </View>
+    </View>
 
+    {/* CONDITIONAL: Only show for users */}
+    {!isVendor && (
+      <>
+        <View style={styles.section}>
+          <Text style={styles.label}>Food Truck Name *</Text>
+          <TextInput
+            style={styles.textInput}
+            placeholder="e.g., Joe's Tacos, Burger Express..."
+            value={foodTruckName}
+            onChangeText={setFoodTruckName}
+            maxLength={50}
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.label}>Cuisine Type *</Text>
+          <TouchableOpacity 
+            style={styles.cuisineSelector}
+            onPress={showCuisineActionSheet}
+          >
+            <Text style={cuisineType ? styles.cuisineSelectorText : styles.cuisineSelectorPlaceholder}>
+              {cuisineType || 'Select cuisine type'}
+            </Text>
+            <Text style={styles.cuisineSelectorArrow}>▼</Text>
+          </TouchableOpacity>
+          {cuisineType ? (
+            <Text style={styles.selectedCuisineText}>
+              Selected: {cuisineType}
+            </Text>
+          ) : null}
+        </View>
+      </>
+    )}
+
+    {/* NEW: Vendor-only field */}
+    {isVendor && (
       <View style={styles.section}>
-        <Text style={styles.label}>Current Crowd Level *</Text>
+        <Text style={styles.label}>Food Inventory Level (Optional)</Text>
         <View style={styles.crowdLevelContainer}>
-          {['Light', 'Moderate', 'Busy'].map((level) => (
+          {INVENTORY_LEVELS.map((level) => (
             <TouchableOpacity
               key={level}
               style={[
                 styles.crowdLevelButton,
-                crowdLevel === level && styles.crowdLevelButtonSelected
+                inventoryLevel === level && (isVendor ? styles.vendorButtonSelected : styles.crowdLevelButtonSelected)
               ]}
-              onPress={() => setCrowdLevel(level)}
+              onPress={() => setInventoryLevel(level)}
             >
               <Text
                 style={[
                   styles.crowdLevelText,
-                  crowdLevel === level && styles.crowdLevelTextSelected
+                  inventoryLevel === level && styles.crowdLevelTextSelected
                 ]}
               >
                 {level}
@@ -493,52 +581,104 @@ const simulateMultipleUsers = async () => {
           ))}
         </View>
       </View>
+    )}
 
-      <View style={styles.section}>
-        <Text style={styles.label}>Additional Notes (Optional)</Text>
-        <TextInput
-          style={[styles.textInput, styles.textArea]}
-          placeholder="Menu highlights, wait time, special deals..."
-          value={additionalNotes}
-          onChangeText={setAdditionalNotes}
-          multiline
-          numberOfLines={3}
-          maxLength={200}
-        />
+    <View style={styles.section}>
+      <Text style={styles.label}>
+        Current Crowd Level {isVendor ? '(Optional)' : '*'}
+      </Text>
+      <View style={styles.crowdLevelContainer}>
+        {['Light', 'Moderate', 'Busy'].map((level) => (
+          <TouchableOpacity
+            key={level}
+            style={[
+              styles.crowdLevelButton,
+              crowdLevel === level && (isVendor ? styles.vendorButtonSelected : styles.crowdLevelButtonSelected)
+            ]}
+            onPress={() => setCrowdLevel(level)}
+          >
+            <Text
+              style={[
+                styles.crowdLevelText,
+                crowdLevel === level && styles.crowdLevelTextSelected
+              ]}
+            >
+              {level}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
+    </View>
 
-      <View style={styles.verificationSection}>
-        <Text style={styles.verificationText}>
-          This sighting will be marked with current time and your location. 
-          Other users will be able to confirm or update this information.
-          {"\n\n"}
-          <Text style={styles.verificationBold}>
-            This sighting needs 3 independent reports to become verified.
-          </Text>
-        </Text>
-      </View>
+    <View style={styles.section}>
+      <Text style={styles.label}>Additional Notes (Optional)</Text>
+      <TextInput
+        style={[styles.textInput, styles.textArea]}
+        placeholder={
+          isVendor 
+            ? "Special deals today, estimated closing time, popular items..."
+            : "Menu highlights, wait time, special deals..."
+        }
+        value={additionalNotes}
+        onChangeText={setAdditionalNotes}
+        multiline
+        numberOfLines={3}
+        maxLength={200}
+      />
+    </View>
 
-            {/* Add this temporary test button - remove after testing */}
-            <TouchableOpacity
+    <View style={[styles.verificationSection, isVendor && styles.vendorVerificationSection]}>
+      <Text style={styles.verificationText}>
+        {isVendor ? (
+          <>
+            ✅ Your check-in will be <Text style={styles.verificationBold}>immediately verified</Text> and visible to customers on the map.
+            {"\n\n"}
+            <Text style={styles.verificationBold}>
+              This helps customers find you and see your current status!
+            </Text>
+          </>
+        ) : (
+          <>
+            This sighting will be marked with current time and your location. 
+            Other users will be able to confirm or update this information.
+            {"\n\n"}
+            <Text style={styles.verificationBold}>
+              ⚠️ This sighting needs 2 other reports to become verified.
+            </Text>
+          </>
+        )}
+      </Text>
+    </View>
+
+    {/* Test button - only for users */}
+    {!isVendor && (
+      <TouchableOpacity
         style={[styles.submitButton, { backgroundColor: '#FF9500', marginBottom: 10 }]}
         onPress={simulateMultipleUsers}
       >
-        <Text style={styles.submitButtonText}>🧪 Simulate 3 Users (Test)</Text>
+        <Text style={styles.submitButtonText}>🧪 Simulate 2 Users (Test)</Text>
       </TouchableOpacity>
+    )}
 
-      <TouchableOpacity
-        style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-        onPress={handleSubmit}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.submitButtonText}>Submit Report</Text>
-        )}
-      </TouchableOpacity>
-    </ScrollView>
-  );
+    <TouchableOpacity
+      style={[
+        styles.submitButton, 
+        loading && styles.submitButtonDisabled,
+        isVendor && styles.vendorSubmitButton
+      ]}
+      onPress={handleSubmit}
+      disabled={loading}
+    >
+      {loading ? (
+        <ActivityIndicator color="#fff" />
+      ) : (
+        <Text style={styles.submitButtonText}>
+          {isVendor ? 'Check In Now' : 'Submit Report'}
+        </Text>
+      )}
+    </TouchableOpacity>
+  </ScrollView>
+);
 }
 
 const styles = StyleSheet.create({
@@ -686,5 +826,43 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  vendorInfoBanner: {
+    backgroundColor: '#fff3cd',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9500',
+  },
+  vendorInfoLabel: {
+    fontSize: 14,
+    color: '#856404',
+    marginBottom: 4,
+  },
+  vendorTruckName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FF9500',
+    marginBottom: 4,
+  },
+  vendorInfoSubtext: {
+    fontSize: 13,
+    color: '#856404',
+  },
+  vendorAccent: {
+    color: '#FF9500',
+  },
+  vendorButtonSelected: {
+    backgroundColor: '#FF9500',
+    borderColor: '#FF9500',
+  },
+  vendorVerificationSection: {
+    backgroundColor: '#e7f8ef',
+    borderLeftWidth: 4,
+    borderLeftColor: '#28a745',
+  },
+  vendorSubmitButton: {
+    backgroundColor: '#FF9500',
   },
 });
