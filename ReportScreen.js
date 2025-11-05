@@ -32,6 +32,8 @@ const CUISINE_TYPES = [
   'Other'
 ];
 
+//confirmed working as of today 
+
 const INVENTORY_LEVELS = ['Plenty', 'Running Low', 'Almost Out'];
 
 export default function ReportScreen({ navigation }) {
