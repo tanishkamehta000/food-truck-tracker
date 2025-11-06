@@ -10,7 +10,7 @@ import {
   Image,
 } from 'react-native';
 
-export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm, onReportIssue }) {
+export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm, onReportIssue, onToggleFavorite, isFavorited, userType }) {
   if (!truck) return null;
 
   const handleNavigate = () => {
@@ -151,6 +151,16 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
 
             {/* action buttons */}
             <View style={styles.actions}>
+                {userType === 'user' && (
+                <TouchableOpacity 
+                 style={[styles.pinButton, isFavorited && styles.pinnedButton]}
+                 onPress={() => onToggleFavorite && onToggleFavorite(truck)}
+                >
+                <Text style={styles.pinButtonText}>
+                    {isFavorited ? '📌 Pinned' : '📍 Pin Truck'}
+                </Text>
+                </TouchableOpacity>
+                )}
               {truck.status === 'pending' && (
                 <TouchableOpacity 
                   style={styles.confirmButton}
@@ -393,5 +403,20 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '700',
+  },
+  pinButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    },
+    pinnedButton: {
+        backgroundColor: '#34C759',
+    },
+  pinButtonText: {
+  color: 'white',
+  fontSize: 15,
+  fontWeight: '600',
   },
 });

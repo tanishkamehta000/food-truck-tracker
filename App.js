@@ -27,6 +27,8 @@ function MapScreen({ navigation, route }) {
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
   const [favorites, setFavorites] = useState([]);
+  const [selectedTruck, setSelectedTruck] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
   const mapRef = useRef(null);
   const markerRefs = useRef({});
 
@@ -229,7 +231,8 @@ function MapScreen({ navigation, route }) {
   };
 
   const handleMarkerPress = async (sighting) => {
-    
+    setSelectedTruck(sighting);
+    setModalVisible(true);
     return;
   };
 
@@ -498,7 +501,10 @@ function MapScreen({ navigation, route }) {
       <FoodTruckInfoScreen 
         visible={modalVisible} 
         truck={selectedTruck} 
-        onClose={() => setModalVisible(false)} 
+        onClose={() => setModalVisible(false)}
+        onToggleFavorite={toggleFavorite}
+        isFavorited={favorites && selectedTruck && favorites.includes(selectedTruck.foodTruckName)}
+        userType={userType}
       />
     </View>
   );
