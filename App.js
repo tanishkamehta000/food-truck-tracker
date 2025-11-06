@@ -1,20 +1,21 @@
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import MapView, { Marker } from 'react-native-maps';
-import { collection, onSnapshot, query, getDocs, deleteDoc, doc } from 'firebase/firestore';
+import MapView, { Marker, Callout } from 'react-native-maps';
+import { collection, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
 import LoginScreen from "./LoginScreen";
+import ProfileScreen from './ProfileScreen';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-function MapScreen({ navigation }) {
+function MapScreen({ navigation, route }) {
   const [location, setLocation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -22,12 +23,79 @@ function MapScreen({ navigation }) {
   const [mapRegion, setMapRegion] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
   const [showDebug, setShowDebug] = useState(true);
+  const [userType, setUserType] = useState(null);
+  const [userEmail, setUserEmail] = useState(null);
+  const [favorites, setFavorites] = useState([]);
+  const mapRef = useRef(null);
+  const markerRefs = useRef({});
 
   useEffect(() => {
     requestLocationPermission();
     clearOldSightings();
     setupFirebaseListener();
+    (async () => {
+      const type = await AsyncStorage.getItem('userType');
+      const email = await AsyncStorage.getItem('userEmail');
+      setUserType(type);
+      setUserEmail(email);
+    })();
   }, []);
+
+  // Subscribe to user's favorites so we can show pin/unpin state and toggle quickly
+  useEffect(() => {
+    if (!userEmail || userType !== 'user') {
+      setFavorites([]);
+      return;
+    }
+
+    const favRef = doc(db, 'favorites', userEmail);
+    const unsub = onSnapshot(favRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setFavorites(data.favorites || []);
+      } else {
+        setFavorites([]);
+      }
+    }, (err) => console.error('favorites onSnapshot error (map):', err));
+
+    return () => unsub();
+  }, [userEmail, userType]);
+
+  // truck focus
+  useEffect(() => {
+    const focusName = route?.params?.focusTruckName;
+    if (!focusName) return;
+
+    const match = sightings.find(s => s.foodTruckName === focusName && s.location && typeof s.location.latitude === 'number' && typeof s.location.longitude === 'number');
+    if (match) {
+      const { latitude, longitude } = match.location;
+      const region = {
+        latitude,
+        longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
+
+      try {
+        if (mapRef.current && mapRef.current.animateToRegion) {
+          mapRef.current.animateToRegion(region, 500);
+        } else {
+          setMapRegion(region);
+        }
+
+        setTimeout(() => {
+          const ref = markerRefs.current[match.id];
+          if (ref && ref.showCallout) {
+            try { ref.showCallout(); } catch (e) { console.warn('showCallout failed', e); }
+          }
+        }, 600);
+      } catch (err) {
+        console.error('focus error', err);
+      }
+    }
+
+    try { navigation.setParams({ focusTruckName: null }); } catch (e) { /* ignore */ }
+  }, [route?.params, sightings]);
 
   const setupFirebaseListener = () => {
     const q = query(collection(db, 'sightings'));
@@ -37,11 +105,10 @@ function MapScreen({ navigation }) {
       querySnapshot.forEach((doc) => {
         const data = doc.data();
         
-        // Handle different data structures
         const sightingData = {
           id: doc.id,
           ...data,
-          // Normalize the location field
+          
           location: data.location || {
             latitude: data.lat,
             longitude: data.lng
@@ -51,7 +118,6 @@ function MapScreen({ navigation }) {
         sightingsData.push(sightingData);
       });
       
-      // Sort by status to ensure verified markers are processed correctly
       const sortedSightings = sightingsData.sort((a, b) => {
         if (a.status === 'verified' && b.status !== 'verified') return -1;
         if (a.status !== 'verified' && b.status === 'verified') return 1;
@@ -65,7 +131,7 @@ function MapScreen({ navigation }) {
       console.log('✅ Verified:', sortedSightings.filter(s => s.status === 'verified').length);
       console.log('⏳ Pending:', sortedSightings.filter(s => s.status === 'pending').length);
       
-      // Enhanced debugging - show status changes
+      // debugging
       sortedSightings.forEach(sighting => {
         const hasLocation = sighting.location && sighting.location.latitude && sighting.location.longitude;
         console.log(`📍 ${sighting.foodTruckName}: ${sighting.status} | Location: ${hasLocation ? '✅' : '❌'} | Coords: ${sighting.location?.latitude}, ${sighting.location?.longitude}`);
@@ -161,10 +227,48 @@ function MapScreen({ navigation }) {
     return uniqueMarkers;
   };
 
+  const handleMarkerPress = async (sighting) => {
+    
+    return;
+  };
+
+  const toggleFavorite = async (sighting) => {
+    console.log('toggleFavorite called for', sighting.foodTruckName);
+    if (!userEmail) {
+      Alert.alert('Not logged in', 'Please log in to pin trucks.');
+      return;
+    }
+
+    if (userType !== 'user') {
+      Alert.alert('Not allowed', 'Only users can pin trucks.');
+      return;
+    }
+
+    const name = sighting.foodTruckName;
+    const favRef = doc(db, 'favorites', userEmail);
+
+    try {
+      const isFavorited = favorites && favorites.includes(name);
+      if (isFavorited) {
+        await updateDoc(favRef, { favorites: arrayRemove(name) });
+      } else {
+        try {
+          await updateDoc(favRef, { favorites: arrayUnion(name) });
+        } catch (err) {
+          
+          await setDoc(favRef, { favorites: [name] });
+        }
+      }
+    } catch (err) {
+      console.error('toggleFavorite error', err);
+      Alert.alert('Error', 'Could not update favorites.');
+    }
+  };
+
   async function clearOldSightings() {
     try {
       const now = new Date();
-      const cutoff = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours ago
+      const cutoff = new Date(now.getTime() - (24 * 60 * 60 * 1000)); // 24 hours
       
       const snap = await getDocs(collection(db, "sightings"));
       const deletions = [];
@@ -173,7 +277,7 @@ function MapScreen({ navigation }) {
         const data = docSnap.data();
         const timestamp = data.timestamp;
         
-        // Only delete if timestamp exists and is older than 24 hours
+        // deleting 
         if (timestamp) {
           const sightingTime = new Date(timestamp);
           if (sightingTime < cutoff && data.status !== "verified") {
@@ -206,7 +310,6 @@ function MapScreen({ navigation }) {
     }
   };
 
-  // Function to center map on markers
   const centerOnMarkers = () => {
     const validMarkers = getValidMarkers();
     if (validMarkers.length > 0 && location) {
@@ -273,6 +376,7 @@ function MapScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <MapView
+        ref={mapRef}
         style={styles.map}
         region={mapRegion} 
         showsUserLocation={true}
@@ -296,9 +400,12 @@ function MapScreen({ navigation }) {
         {validMarkers.map((sighting) => {
           const markerColor = getMarkerColor(sighting.status, sighting.crowdLevel);
           console.log(`📍 Rendering marker: ${sighting.foodTruckName} with color: ${markerColor} (status: ${sighting.status})`);
-          
+
+          const isFavorited = favorites && favorites.includes(sighting.foodTruckName);
+
           return (
             <Marker
+              ref={(ref) => { if (ref) markerRefs.current[sighting.id] = ref; }}
               key={sighting.id}
               coordinate={{
                 latitude: sighting.location.latitude,
@@ -307,8 +414,25 @@ function MapScreen({ navigation }) {
               title={sighting.foodTruckName}
               description={getMarkerDescription(sighting)}
               pinColor={markerColor}
-              onPress={() => console.log('📍 Marker pressed:', sighting.foodTruckName, 'Status:', sighting.status, 'Color:', markerColor)}
-            />
+              onCalloutPress={() => toggleFavorite(sighting)}
+            >
+              <Callout tooltip={false} onPress={() => { /* noop */ }}>
+                <View style={styles.calloutContainer}>
+                  <Text style={styles.calloutTitle}>{sighting.foodTruckName}</Text>
+                  <Text style={styles.calloutDesc}>{getMarkerDescription(sighting)}</Text>
+                  {userType === 'user' ? (
+                    <TouchableOpacity
+                      style={[styles.pinButton, isFavorited ? styles.unpinStyle : styles.pinStyle]}
+                      onPress={() => toggleFavorite(sighting)}
+                    >
+                      <Text style={styles.pinButtonText}>{isFavorited ? 'Unpin' : 'Pin'}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={styles.calloutNote}>Only users can pin trucks</Text>
+                  )}
+                </View>
+              </Callout>
+            </Marker>
           );
         })}
       </MapView>
@@ -404,6 +528,14 @@ function MainApp() {
         options={{
           title: 'Report Sighting',
           tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>📝</Text>,
+        }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>👤</Text>,
         }}
       />
     </Tab.Navigator>
@@ -521,4 +653,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  calloutContainer: {
+    width: 200,
+    padding: 8,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  calloutTitle: { fontWeight: '700', marginBottom: 4 },
+  calloutDesc: { fontSize: 12, color: '#444', marginBottom: 8, textAlign: 'center' },
+  pinButton: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6 },
+  pinButtonText: { color: 'white', fontWeight: '700' },
+  pinStyle: { backgroundColor: '#007AFF' },
+  unpinStyle: { backgroundColor: '#FF3B30' },
+  calloutNote: { fontSize: 12, color: '#666' },
 });
