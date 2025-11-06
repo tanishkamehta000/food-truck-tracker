@@ -164,6 +164,7 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
                 </Text>
                 </TouchableOpacity>
                 )}
+                {/* confirm button logic */}
               <TouchableOpacity 
                   style={styles.confirmButton}
                   onPress={() => {
@@ -175,7 +176,7 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
                     {truck.status === 'verified' ? '✓ Still Here!' : '✓ Confirm Location'}
                   </Text>
                 </TouchableOpacity>
-
+                {/* */}
               <TouchableOpacity 
                 style={styles.reportButton}
                 onPress={() => {

@@ -269,6 +269,7 @@ function MapScreen({ navigation, route }) {
     }
   };
 
+
   const handleConfirmLocation = async (truck) => {
     if (!userEmail) {
       Alert.alert('Not logged in', 'Please log in to confirm locations.');
@@ -346,6 +347,36 @@ function MapScreen({ navigation, route }) {
     }
   };
 
+  const findSimilarSightings = async (truckName, userLocation) => {
+    try {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const sightingsRef = collection(db, 'sightings');
+      const q = query(sightingsRef, where('foodTruckName', '==', truckName));
+      const querySnapshot = await getDocs(q);
+      const similarSightings = [];
+
+      querySnapshot.forEach((docSnap) => {
+        const sighting = { id: docSnap.id, ...docSnap.data() };
+        
+        let sightingTime = sighting.timestamp?.toDate ? sighting.timestamp.toDate() : new Date(sighting.timestamp);
+        if (!sightingTime || sightingTime < oneHourAgo) return;
+        
+        const distance = calculateDistance(
+          userLocation.latitude,
+          userLocation.longitude,
+          sighting.location.latitude,
+          sighting.location.longitude
+        );
+
+        if (distance < 100) similarSightings.push(sighting);
+      });
+
+      return similarSightings;
+    } catch (error) {
+      console.error('Error finding similar sightings:', error);
+      return [];
+    }
+  };
 
   async function clearOldSightings() {
     try {
@@ -583,6 +614,7 @@ function MapScreen({ navigation, route }) {
         truck={selectedTruck} 
         onClose={() => setModalVisible(false)}
         onToggleFavorite={toggleFavorite}
+        onConfirm={handleConfirmLocation}
         isFavorited={favorites && selectedTruck && favorites.includes(selectedTruck.foodTruckName)}
         userType={userType}
       />
