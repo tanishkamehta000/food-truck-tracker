@@ -283,7 +283,7 @@ function MapScreen({ navigation, route }) {
 
     try {
       if (truck.status === 'verified') {
-        // For verified trucks: just add to confirmations list
+        // for verified trucks: just add to confirmations list
         const truckRef = doc(db, 'sightings', truck.id);
         const confirmations = truck.confirmations || [];
         
@@ -300,7 +300,7 @@ function MapScreen({ navigation, route }) {
         Alert.alert('✓ Confirmed!', `Thanks for confirming ${truck.foodTruckName} is still here!`);
         
       } else {
-        // For pending trucks: add as new report and check threshold
+        // for pending trucks: we should add as a new report and check threshold
         const similarSightings = await findSimilarSightings(truck.foodTruckName, truck.location);
         
         const uniqueUserId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
