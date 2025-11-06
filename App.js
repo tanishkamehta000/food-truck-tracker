@@ -11,6 +11,7 @@ import ReportScreen from './ReportScreen';
 import LoginScreen from "./LoginScreen";
 import ProfileScreen from './ProfileScreen';
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import FoodTruckInfoScreen from './FoodTruckInfoScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -494,6 +495,11 @@ function MapScreen({ navigation, route }) {
           Total: {validMarkers.length}
         </Text>
       </View>
+      <FoodTruckInfoScreen 
+        visible={modalVisible} 
+        truck={selectedTruck} 
+        onClose={() => setModalVisible(false)} 
+      />
     </View>
   );
 }
