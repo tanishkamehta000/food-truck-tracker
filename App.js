@@ -418,6 +418,8 @@ function MapScreen({ navigation, route }) {
               title={sighting.foodTruckName}
               description={getMarkerDescription(sighting)}
               pinColor={markerColor}
+              //added new handle markerPress
+              onPress={() => handleMarkerPress(sighting)}
               onCalloutPress={() => toggleFavorite(sighting)}
             >
               <Callout tooltip={false} onPress={() => { /* noop */ }}>
