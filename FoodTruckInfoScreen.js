@@ -145,6 +145,9 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
                 <Text style={styles.confirmationIcon}>✓</Text>
                 <Text style={styles.confirmationText}>
                   Verified by {truck.verifiedBy === 'vendor' ? 'vendor' : '3 users'}
+                  {truck.confirmations && truck.confirmations.length > 0 && 
+                    ` • Confirmed by ${truck.confirmations.length} user${truck.confirmations.length > 1 ? 's' : ''} today`
+                  }
                 </Text>
               </View>
             )}
@@ -161,17 +164,17 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
                 </Text>
                 </TouchableOpacity>
                 )}
-              {truck.status === 'pending' && (
-                <TouchableOpacity 
+              <TouchableOpacity 
                   style={styles.confirmButton}
                   onPress={() => {
                     onConfirm && onConfirm(truck);
                     onClose();
                   }}
                 >
-                  <Text style={styles.confirmButtonText}>✓ Confirm Location</Text>
+                  <Text style={styles.confirmButtonText}>
+                    {truck.status === 'verified' ? '✓ Still Here!' : '✓ Confirm Location'}
+                  </Text>
                 </TouchableOpacity>
-              )}
 
               <TouchableOpacity 
                 style={styles.reportButton}

@@ -269,6 +269,84 @@ function MapScreen({ navigation, route }) {
     }
   };
 
+  const handleConfirmLocation = async (truck) => {
+    if (!userEmail) {
+      Alert.alert('Not logged in', 'Please log in to confirm locations.');
+      return;
+    }
+
+    if (userType !== 'user') {
+      Alert.alert('Not allowed', 'Only users can confirm locations.');
+      return;
+    }
+
+    try {
+      if (truck.status === 'verified') {
+        // For verified trucks: just add to confirmations list
+        const truckRef = doc(db, 'sightings', truck.id);
+        const confirmations = truck.confirmations || [];
+        
+        if (confirmations.includes(userEmail)) {
+          Alert.alert('Already Confirmed', 'You already confirmed this truck!');
+          return;
+        }
+
+        await updateDoc(truckRef, {
+          confirmations: arrayUnion(userEmail),
+          lastConfirmedAt: new Date().toISOString()
+        });
+
+        Alert.alert('✓ Confirmed!', `Thanks for confirming ${truck.foodTruckName} is still here!`);
+        
+      } else {
+        // For pending trucks: add as new report and check threshold
+        const similarSightings = await findSimilarSightings(truck.foodTruckName, truck.location);
+        
+        const uniqueUserId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const confirmation = {
+          foodTruckName: truck.foodTruckName,
+          cuisineType: truck.cuisineType,
+          crowdLevel: truck.crowdLevel,
+          location: truck.location,
+          timestamp: new Date().toISOString(),
+          status: 'pending',
+          reporterEmail: userEmail,
+          reporterId: uniqueUserId,
+          confirmationCount: 1,
+          verifiedBy: 'user',
+        };
+
+        const docRef = await addDoc(collection(db, 'sightings'), confirmation);
+
+        const allSightings = [...similarSightings, { id: docRef.id, ...confirmation }];
+        const uniqueReporters = new Set();
+        allSightings.forEach(s => {
+          const id = s.reporterId || s.reporterEmail;
+          if (id) uniqueReporters.add(id);
+        });
+
+        if (uniqueReporters.size >= 3) {
+          const updatePromises = allSightings.map(s => 
+            updateDoc(doc(db, 'sightings', s.id), {
+              status: 'verified',
+              verifiedAt: new Date().toISOString()
+            })
+          );
+          await Promise.all(updatePromises);
+          
+          Alert.alert('🎉 Verified!', `${truck.foodTruckName} is now verified!`);
+        } else {
+          const needed = 3 - uniqueReporters.size;
+          Alert.alert('✓ Confirmed!', `Thanks! Need ${needed} more confirmation${needed > 1 ? 's' : ''}.`);
+        }
+      }
+    } catch (error) {
+      console.error('Error confirming location:', error);
+      Alert.alert('Error', 'Failed to confirm location.');
+    }
+  };
+
+
   async function clearOldSightings() {
     try {
       const now = new Date();
