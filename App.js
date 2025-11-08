@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -14,6 +15,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 function MapScreen({ navigation, route }) {
   const [location, setLocation] = useState(null);
@@ -33,6 +42,22 @@ function MapScreen({ navigation, route }) {
     requestLocationPermission();
     clearOldSightings();
     setupFirebaseListener();
+    // Create Android notification channel
+    (async () => {
+      try {
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('default', {
+            name: 'default',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 250, 250, 250],
+            lightColor: '#FF231F7C',
+          });
+          console.log('Android notification channel set');
+        }
+      } catch (err) {
+        console.warn('Failed to set Android notification channel', err);
+      }
+    })();
     (async () => {
       const type = await AsyncStorage.getItem('userType');
       const email = await AsyncStorage.getItem('userEmail');
@@ -41,7 +66,6 @@ function MapScreen({ navigation, route }) {
     })();
   }, []);
 
-  // Subscribe to user's favorites so we can show pin/unpin state and toggle quickly
   useEffect(() => {
     if (!userEmail || userType !== 'user') {
       setFavorites([]);
@@ -225,11 +249,6 @@ function MapScreen({ navigation, route }) {
     console.log('👥 Unique markers after grouping:', uniqueMarkers.length);
     
     return uniqueMarkers;
-  };
-
-  const handleMarkerPress = async (sighting) => {
-    
-    return;
   };
 
   const toggleFavorite = async (sighting) => {
