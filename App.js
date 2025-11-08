@@ -4,7 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import MapView, { Marker, Callout } from 'react-native-maps';
-import { collection, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc, where, addDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
@@ -302,7 +302,6 @@ function MapScreen({ navigation, route }) {
       } else {
         // for pending trucks: we should add as a new report and check threshold
         const similarSightings = await findSimilarSightings(truck.foodTruckName, truck.location);
-        
         const uniqueUserId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const confirmation = {
           foodTruckName: truck.foodTruckName,
@@ -317,8 +316,11 @@ function MapScreen({ navigation, route }) {
           verifiedBy: 'user',
         };
 
+        //add doc doesn't exist for some reason?
+
         const docRef = await addDoc(collection(db, 'sightings'), confirmation);
 
+        //some reason this also does not exist
         const allSightings = [...similarSightings, { id: docRef.id, ...confirmation }];
         const uniqueReporters = new Set();
         allSightings.forEach(s => {
@@ -326,7 +328,7 @@ function MapScreen({ navigation, route }) {
           if (id) uniqueReporters.add(id);
         });
 
-        if (uniqueReporters.size >= 3) {
+        if (uniqueReporters.size >= 5) {
           const updatePromises = allSightings.map(s => 
             updateDoc(doc(db, 'sightings', s.id), {
               status: 'verified',
@@ -337,7 +339,7 @@ function MapScreen({ navigation, route }) {
           
           Alert.alert('🎉 Verified!', `${truck.foodTruckName} is now verified!`);
         } else {
-          const needed = 3 - uniqueReporters.size;
+          const needed = 5 - uniqueReporters.size;
           Alert.alert('✓ Confirmed!', `Thanks! Need ${needed} more confirmation${needed > 1 ? 's' : ''}.`);
         }
       }
@@ -377,6 +379,18 @@ function MapScreen({ navigation, route }) {
       return [];
     }
   };
+
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+      const R = 6371; // Earth's radius in km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c * 1000; // Returns distance in meters
+    };
 
   async function clearOldSightings() {
     try {

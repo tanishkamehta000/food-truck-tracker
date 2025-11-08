@@ -429,7 +429,7 @@ const simulateMultipleUsers = async () => {
         status: s.status
       })));
   
-      if (uniqueReporterCount >= 3) {
+      if (uniqueReporterCount >= 5) {
         // We have 3 or more UNIQUE confirmations - verify these sightings
         console.log('🎉 Reached 3 unique confirmations! Verifying sightings...');
         await verifySighting(allSightings.map(s => s.id));
@@ -449,7 +449,7 @@ const simulateMultipleUsers = async () => {
         );
       } else {
         // Not enough confirmations yet
-        const needed = 3 - uniqueReporterCount;
+        const needed = 5 - uniqueReporterCount;
         console.log('⏳ Need more unique confirmations:', needed, 'more needed');
         Alert.alert(
           'Success!',

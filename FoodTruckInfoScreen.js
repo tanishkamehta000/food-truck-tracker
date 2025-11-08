@@ -40,7 +40,7 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
     const time = new Date(timestamp);
     const minutes = Math.floor((now - time) / 60000);
     
-    if (minutes < 1) return 'Just now';
+    if (minutes < 1) return 'just now';
     if (minutes < 60) return `${minutes} min ago`;
     const hours = Math.floor(minutes / 60);
     if (hours < 24) return `${hours} hr ago`;
@@ -89,6 +89,12 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
               </View>
             </View>
 
+            {/* location */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Location</Text>
+              <Text style={styles.address}>{truck.location.address}</Text>
+            </View>
+
             {/* quick info card */}
             <View style={styles.quickInfo}>
               <View style={styles.infoCard}>
@@ -133,24 +139,35 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
               </View>
             )}
 
-            {/* location */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Location</Text>
-              <Text style={styles.address}>{truck.location.address}</Text>
-            </View>
-
             {/* confirmation info */}
-            {truck.status === 'verified' && (
-              <View style={styles.confirmationInfo}>
-                <Text style={styles.confirmationIcon}>✓</Text>
-                <Text style={styles.confirmationText}>
-                  Verified by {truck.verifiedBy === 'vendor' ? 'vendor' : '3 users'}
-                  {truck.confirmations && truck.confirmations.length > 0 && 
-                    ` • Confirmed by ${truck.confirmations.length} user${truck.confirmations.length > 1 ? 's' : ''} today`
-                  }
-                </Text>
-              </View>
-            )}
+            <View style={[
+              styles.confirmationInfo, 
+              { backgroundColor: truck.status === 'verified' ? '#e7f8ef' : '#fff3cd' }
+            ]}>
+              <Text style={styles.confirmationIcon}>
+                {truck.status === 'verified' ? '✓' : '⏳'}
+              </Text>
+              <Text style={styles.confirmationText}>
+                {truck.status === 'verified' ? (
+                  <>
+                    {truck.confirmations && truck.confirmations.length > 0 
+                      ? `Confirmed by ${truck.confirmations.length} user${truck.confirmations.length > 1 ? 's' : ''} today`
+                      : 'Verified'
+                    }
+                    {truck.lastConfirmedAt && 
+                      ` • Last confirmed ${timeAgo(truck.lastConfirmedAt)}`
+                    }
+                  </>
+                ) : (
+                  <>
+                    Pending verification • {truck.confirmationCount || 1} of 5 confirmations
+                    {truck.lastConfirmedAt && 
+                      ` • Last confirmed ${timeAgo(truck.lastConfirmedAt)}`
+                    }
+                  </>
+                )}
+              </Text>
+            </View>
 
             {/* action buttons */}
             <View style={styles.actions}>
@@ -355,6 +372,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     marginBottom: 20,
+    flexWrap: 'wrap',
   },
   confirmationIcon: {
     fontSize: 20,
@@ -364,6 +382,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#28a745',
     fontWeight: '500',
+    flex: 1,
+    flexShrink: 1,
   },
   actions: {
     flexDirection: 'row',
