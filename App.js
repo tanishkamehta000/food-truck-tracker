@@ -12,6 +12,14 @@ import LoginScreen from "./LoginScreen";
 import ProfileScreen from './ProfileScreen';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import FoodTruckInfoScreen from './FoodTruckInfoScreen';
+import { 
+  initSession, 
+  endSession, 
+  trackMapLoad, 
+  trackModalOpen, 
+  trackModalAction,
+  trackModalClose 
+} from './analytics';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -29,10 +37,14 @@ function MapScreen({ navigation, route }) {
   const [favorites, setFavorites] = useState([]);
   const [selectedTruck, setSelectedTruck] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [mapLoadStartTime] = useState(Date.now());
+  const [modalOpenTime, setModalOpenTime] = useState(null);
+  const [modalActionTaken, setModalActionTaken] = useState(false);
   const mapRef = useRef(null);
   const markerRefs = useRef({});
 
   useEffect(() => {
+    initSession();
     requestLocationPermission();
     clearOldSightings();
     setupFirebaseListener();
@@ -42,6 +54,10 @@ function MapScreen({ navigation, route }) {
       setUserType(type);
       setUserEmail(email);
     })();
+
+    return () => {
+    endSession();
+    };
   }, []);
 
   // Subscribe to user's favorites so we can show pin/unpin state and toggle quickly
@@ -231,10 +247,17 @@ function MapScreen({ navigation, route }) {
   };
 
   const handleMarkerPress = async (sighting) => {
-    setSelectedTruck(sighting);
-    setModalVisible(true);
-    return;
-  };
+      const startTime = Date.now();
+      setSelectedTruck(sighting);
+      setModalVisible(true);
+      setModalActionTaken(false); // resetting
+      setModalOpenTime(startTime);
+      
+      // track after state updates
+      setTimeout(() => {
+        trackModalOpen(startTime, sighting.foodTruckName);
+      }, 100);
+    };
 
   const toggleFavorite = async (sighting) => {
     console.log('toggleFavorite called for', sighting.foodTruckName);
@@ -255,13 +278,15 @@ function MapScreen({ navigation, route }) {
       const isFavorited = favorites && favorites.includes(name);
       if (isFavorited) {
         await updateDoc(favRef, { favorites: arrayRemove(name) });
+        trackModalAction('unpin', name);
       } else {
         try {
           await updateDoc(favRef, { favorites: arrayUnion(name) });
         } catch (err) {
-          
           await setDoc(favRef, { favorites: [name] });
         }
+        trackModalAction('pin', name); 
+        setModalActionTaken(true);
       }
     } catch (err) {
       console.error('toggleFavorite error', err);
@@ -297,6 +322,8 @@ function MapScreen({ navigation, route }) {
           lastConfirmedAt: new Date().toISOString()
         });
 
+        trackModalAction('confirm', truck.foodTruckName);
+        setModalActionTaken(true);
         Alert.alert('✓ Confirmed!', `Thanks for confirming ${truck.foodTruckName} is still here!`);
         
       } else {
@@ -328,7 +355,7 @@ function MapScreen({ navigation, route }) {
           if (id) uniqueReporters.add(id);
         });
 
-        if (uniqueReporters.size >= 5) {
+        if (uniqueReporters.size >= 10) {
           const updatePromises = allSightings.map(s => 
             updateDoc(doc(db, 'sightings', s.id), {
               status: 'verified',
@@ -339,9 +366,12 @@ function MapScreen({ navigation, route }) {
           
           Alert.alert('🎉 Verified!', `${truck.foodTruckName} is now verified!`);
         } else {
-          const needed = 5 - uniqueReporters.size;
+          const needed = 10 - uniqueReporters.size;
           Alert.alert('✓ Confirmed!', `Thanks! Need ${needed} more confirmation${needed > 1 ? 's' : ''}.`);
         }
+
+        trackModalAction('confirm', truck.foodTruckName);
+        setModalActionTaken(true);
       }
     } catch (error) {
       console.error('Error confirming location:', error);
@@ -508,8 +538,10 @@ function MapScreen({ navigation, route }) {
         region={mapRegion} 
         showsUserLocation={true}
         showsMyLocationButton={true}
-        onMapReady={() => console.log('🗺️ Map is ready')}
-      >
+        onMapReady={() => {
+          console.log('🗺️ Map is ready');
+          trackMapLoad(mapLoadStartTime);
+        }}>
         {/* Current user location */}
         {location && (
           <Marker
@@ -626,11 +658,18 @@ function MapScreen({ navigation, route }) {
       <FoodTruckInfoScreen 
         visible={modalVisible} 
         truck={selectedTruck} 
-        onClose={() => setModalVisible(false)}
+        onClose={() => {
+          if (selectedTruck && modalOpenTime) {
+            trackModalClose(selectedTruck.foodTruckName, modalActionTaken);
+          }
+          setModalVisible(false);
+          setModalActionTaken(false);
+        }}
         onToggleFavorite={toggleFavorite}
         onConfirm={handleConfirmLocation}
         isFavorited={favorites && selectedTruck && favorites.includes(selectedTruck.foodTruckName)}
         userType={userType}
+        userLocation={location}
       />
     </View>
   );

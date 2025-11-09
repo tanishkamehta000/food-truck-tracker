@@ -9,13 +9,15 @@ import {
   Linking,
   Image,
 } from 'react-native';
+import { trackModalAction } from './analytics';
 
-export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm, onReportIssue, onToggleFavorite, isFavorited, userType }) {
+export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm, onReportIssue, onToggleFavorite, isFavorited, userType, userLocation }) {
   if (!truck) return null;
 
   const handleNavigate = () => {
     const { latitude, longitude } = truck.location;
     const url = `https://maps.apple.com/?daddr=${latitude},${longitude}`;
+    trackModalAction('navigate', truck.foodTruckName);
     Linking.openURL(url);
   };
 
@@ -30,6 +32,9 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
 
   const getStatusBadge = () => {
     if (truck.status === 'verified') {
+      if (truck.verifiedBy === 'vendor') {
+        return { text: 'Vendor Verified', color: '#FF9800', icon: '🚚' };
+      }
       return { text: 'Verified', color: '#4CAF50', icon: '✓' };
     }
     return { text: 'Pending', color: '#999', icon: '⏳' };
@@ -46,6 +51,24 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
     if (hours < 24) return `${hours} hr ago`;
     return `${Math.floor(hours / 24)} days ago`;
   };
+
+  const calculateDistance = (userLoc, truckLoc) => {
+  if (!userLoc || !truckLoc) return '0.0';
+  
+    const R = 6371; // Earth's radius in km
+    const dLat = (truckLoc.latitude - userLoc.latitude) * Math.PI / 180;
+    const dLon = (truckLoc.longitude - userLoc.longitude) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(userLoc.latitude * Math.PI / 180) * Math.cos(truckLoc.latitude * Math.PI / 180) *
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distanceKm = R * c;
+    const distanceMiles = distanceKm * 0.621371; // Convert to miles
+    return distanceMiles.toFixed(1);
+  };
+
+
 
   const statusBadge = getStatusBadge();
 
@@ -106,7 +129,9 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
               <View style={styles.infoCard}>
                 <Text style={styles.infoIcon}>📍</Text>
                 <Text style={styles.infoLabel}>Distance</Text>
-                <Text style={styles.infoValue}>0.7 mi</Text>
+                <Text style={styles.infoValue}>
+                  {userLocation ? `${calculateDistance(userLocation, truck.location)} mi` : 'N/A'}
+                </Text>
               </View>
 
               <View style={[styles.infoCard, { backgroundColor: getCrowdLevelColor(truck.crowdLevel) }]}>
@@ -150,17 +175,28 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
               <Text style={styles.confirmationText}>
                 {truck.status === 'verified' ? (
                   <>
-                    {truck.confirmations && truck.confirmations.length > 0 
-                      ? `Confirmed by ${truck.confirmations.length} user${truck.confirmations.length > 1 ? 's' : ''} today`
-                      : 'Verified'
-                    }
+                    {truck.verifiedBy === 'vendor' ? (
+                      <>
+                        🚚 Verified by vendor
+                        {truck.confirmations && truck.confirmations.length > 0 && 
+                          ` • Confirmed by ${truck.confirmations.length} user${truck.confirmations.length > 1 ? 's' : ''} today`
+                        }
+                      </>
+                    ) : (
+                      <>
+                        {truck.confirmations && truck.confirmations.length > 0 
+                          ? `Confirmed by ${truck.confirmations.length} user${truck.confirmations.length > 1 ? 's' : ''} today`
+                          : 'Verified by users'
+                        }
+                      </>
+                    )}
                     {truck.lastConfirmedAt && 
                       ` • Last confirmed ${timeAgo(truck.lastConfirmedAt)}`
                     }
                   </>
                 ) : (
                   <>
-                    Pending verification • {truck.confirmationCount || 1} of 5 confirmations
+                    Pending verification • {truck.confirmationCount || 1} of 10 confirmations
                     {truck.lastConfirmedAt && 
                       ` • Last confirmed ${timeAgo(truck.lastConfirmedAt)}`
                     }
@@ -197,6 +233,7 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
               <TouchableOpacity 
                 style={styles.reportButton}
                 onPress={() => {
+                  trackModalAction('report_issue', truck.foodTruckName);
                   onReportIssue && onReportIssue(truck);
                   onClose();
                 }}

@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import { db } from './firebaseConfig';
 import { collection, addDoc, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { trackReportSubmission } from './analytics';
 
 const CUISINE_TYPES = [
   'Mexican',
@@ -288,6 +289,7 @@ const simulateMultipleUsers = async () => {
 
   const handleSubmit = async () => {
     //added seperate case for isVendor
+    const startTime = Date.now();
 
     const isVendor = userType === "vendor";
 
@@ -429,9 +431,9 @@ const simulateMultipleUsers = async () => {
         status: s.status
       })));
   
-      if (uniqueReporterCount >= 5) {
-        // We have 3 or more UNIQUE confirmations - verify these sightings
-        console.log('🎉 Reached 3 unique confirmations! Verifying sightings...');
+      if (uniqueReporterCount >= 10) {
+        // We have 10 or more UNIQUE confirmations - verify these sightings
+        console.log('🎉 Reached 10 unique confirmations! Verifying sightings...');
         await verifySighting(allSightings.map(s => s.id));
         
         Alert.alert(
@@ -449,7 +451,7 @@ const simulateMultipleUsers = async () => {
         );
       } else {
         // Not enough confirmations yet
-        const needed = 5 - uniqueReporterCount;
+        const needed = 10 - uniqueReporterCount;
         console.log('⏳ Need more unique confirmations:', needed, 'more needed');
         Alert.alert(
           'Success!',
@@ -465,9 +467,14 @@ const simulateMultipleUsers = async () => {
           ]
         );
       }
+      await trackReportSubmission(startTime, foodTruckName, true);
+    
+      Alert.alert('Success', message);
+      navigation.goBack();
   
     } catch (error) {
       console.error('❌ Error submitting report:', error);
+      await trackReportSubmission(startTime, foodTruckName, false);
       Alert.alert('Error', 'Failed to submit report. Please try again.');
     } finally {
       setLoading(false);
@@ -643,7 +650,7 @@ const simulateMultipleUsers = async () => {
             Other users will be able to confirm or update this information.
             {"\n\n"}
             <Text style={styles.verificationBold}>
-              ⚠️ This sighting needs 2 other reports to become verified.
+              ⚠️ This sighting needs 9 other reports to become verified.
             </Text>
           </>
         )}
@@ -656,7 +663,7 @@ const simulateMultipleUsers = async () => {
         style={[styles.submitButton, { backgroundColor: '#FF9500', marginBottom: 10 }]}
         onPress={simulateMultipleUsers}
       >
-        <Text style={styles.submitButtonText}>🧪 Simulate 2 Users (Test)</Text>
+        <Text style={styles.submitButtonText}>🧪 Simulate 9 Users (Test)</Text>
       </TouchableOpacity>
     )}
 
