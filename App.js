@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, Text, TextInput, Alert, ActivityIndicator, TouchableOpacity, Modal, Linking, Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import MapView, { Marker, Callout } from 'react-native-maps';
-import { collection, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc } from 'firebase/firestore';
+import { collection, where, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
@@ -15,7 +15,63 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
+async function deleteByTruckName(name) {
+  const trimmed = (name || '').trim();
+  if (!trimmed) {
+    Alert.alert('Validation', 'Enter a truck name.');
+    return;
+  }
+
+  try {
+    // First try exact match via Firestore query (fast path)
+    let docs = [];
+    {
+      const q = query(collection(db, 'sightings'), where('foodTruckName', '==', trimmed));
+      const snap = await getDocs(q);
+      docs = snap.docs;
+    }
+
+    // Fallback: case-insensitive match (client-side filter) if nothing found
+    if (docs.length === 0) {
+      const all = await getDocs(collection(db, 'sightings'));
+      docs = all.docs.filter(d =>
+        String((d.data().foodTruckName || '')).toLowerCase() === trimmed.toLowerCase()
+      );
+    }
+
+    if (docs.length === 0) {
+      Alert.alert('No results', `No sightings found for "${trimmed}".`);
+      return;
+    }
+
+    await Promise.all(docs.map(d => deleteDoc(d.ref)));
+    Alert.alert('Deleted', `Removed ${docs.length} sighting(s) for "${trimmed}".`);
+    console.log(`Deleted ${docs.length} docs for ${trimmed}`);
+  } catch (err) {
+    console.error('Error deleting by truck name:', err);
+    Alert.alert('Error', 'Could not delete truck sightings.');
+  }
+}
+
+// delete everything
+async function deleteAllSightings() {
+  try {
+    const snap = await getDocs(collection(db, 'sightings'));
+    if (snap.empty) {
+      Alert.alert('No data', 'There are no sightings to delete.');
+      return;
+    }
+    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
+    Alert.alert('Deleted', `Removed ${snap.docs.length} total sightings.`);
+    console.log(`Deleted all ${snap.docs.length} docs`);
+  } catch (err) {
+    console.error('Error deleting all sightings:', err);
+    Alert.alert('Error', 'Could not delete all sightings.');
+  }
+}
+
 function MapScreen({ navigation, route }) {
+  const [devDeleteName, setDevDeleteName] = useState('');
   const [location, setLocation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -28,17 +84,23 @@ function MapScreen({ navigation, route }) {
   const [favorites, setFavorites] = useState([]);
   const mapRef = useRef(null);
   const markerRefs = useRef({});
+  const [selected, setSelected] = useState(null); // the clicked sighting
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [popular, setPopular] = useState([]);     // array of strings, aggregated
+  const [confirmCount, setConfirmCount] = useState(0);
+  const [lastConfirmedMin, setLastConfirmedMin] = useState(null);
 
   useEffect(() => {
     requestLocationPermission();
     clearOldSightings();
-    setupFirebaseListener();
+    const unsub = setupFirebaseListener();
     (async () => {
       const type = await AsyncStorage.getItem('userType');
       const email = await AsyncStorage.getItem('userEmail');
       setUserType(type);
       setUserEmail(email);
-    })();
+      })();
+    return () => unsub && unsub();
   }, []);
 
   // Subscribe to user's favorites so we can show pin/unpin state and toggle quickly
@@ -97,6 +159,89 @@ function MapScreen({ navigation, route }) {
     try { navigation.setParams({ focusTruckName: null }); } catch (e) { /* ignore */ }
   }, [route?.params, sightings]);
 
+  function getCrowdTextColor(level) {
+    if (level === 'Busy') return '#CC0000';
+    if (level === 'Moderate') return '#C9A900';
+    if (level === 'Light') return '#2E7D32';
+    return '#6B7280';
+  }
+
+  // distance helper (meters)
+  function distanceMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371e3;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) *
+        Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+  }
+
+  // open the bottom sheet and aggregate details for this truck
+  async function openTruckSheet(sighting) {
+    try {
+      setSelected(sighting);
+
+      // fetch all sightings of the same truck (e.g., last 24h is typical — you can add a date filter later)
+      const snap = await getDocs(
+        query(collection(db, 'sightings'), where('foodTruckName', '==', sighting.foodTruckName))
+      );
+
+      // aggregate popular items + verification stats + latest notes timestamp
+      const itemsFreq = {};
+      let latestISO = null;
+      let latestNotes = sighting.additionalNotes || '';
+      let verifiedCount = 0;
+
+      snap.forEach((d) => {
+        const data = d.data();
+
+        // collect popular items users reported on ReportScreen (favoriteItems: string[])
+        if (Array.isArray(data.favoriteItems)) {
+          data.favoriteItems.forEach((it) => {
+            const key = String(it || '').trim();
+            if (!key) return;
+            itemsFreq[key] = (itemsFreq[key] || 0) + 1;
+          });
+        }
+
+        if (data.status === 'verified') verifiedCount += 1;
+
+        // pick freshest description
+        const raw = data.timestamp || data.verifiedAt || data.createdAt;
+        const ts = raw ? new Date(raw) : null;
+        if (ts && (!latestISO || ts > new Date(latestISO))) {
+          latestISO = ts.toISOString();
+          if ((data.additionalNotes || '').trim()) {
+            latestNotes = data.additionalNotes;
+          }
+        }
+      });
+
+      // turn frequency map into top chips
+      const popularItems = Object.entries(itemsFreq)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name]) => name)
+        .slice(0, 8);
+
+      setPopular(popularItems);
+      setConfirmCount(verifiedCount);
+      setLastConfirmedMin(
+        latestISO ? Math.max(0, Math.round((Date.now() - new Date(latestISO).getTime()) / 60000)) : null
+      );
+
+      // ensure selected carries the freshest notes for display
+      setSelected((prev) => ({ ...prev, additionalNotes: latestNotes }));
+
+      setSheetVisible(true);
+    } catch (e) {
+      console.error('openTruckSheet error', e);
+      setSheetVisible(true); // still show something
+    }
+  }
+
   const setupFirebaseListener = () => {
     const q = query(collection(db, 'sightings'));
     
@@ -127,7 +272,7 @@ function MapScreen({ navigation, route }) {
       setSightings(sortedSightings);
       setLastUpdate(Date.now());
       
-      console.log('🔄 Firebase update - Total sightings:', sortedSightings.length);
+      console.log('Firebase update - Total sightings:', sortedSightings.length);
       console.log('✅ Verified:', sortedSightings.filter(s => s.status === 'verified').length);
       console.log('⏳ Pending:', sortedSightings.filter(s => s.status === 'pending').length);
       
@@ -179,14 +324,11 @@ function MapScreen({ navigation, route }) {
     }
   };
 
-  const getMarkerColor = (status, crowdLevel) => {
-    console.log(`🎨 Getting color for status: ${status}, crowd: ${crowdLevel}`); // Debug color selection
-    if (status === 'verified') return 'green';
-    if (status === 'pending') return 'gray';
+  const getMarkerColor = (crowdLevel) => {
+    if (crowdLevel === 'Light') return 'green';
+    if (crowdLevel === 'Moderate') return 'yellow';
     if (crowdLevel === 'Busy') return 'red';
-    if (crowdLevel === 'Moderate') return 'orange';
-    if (crowdLevel === 'Light') return 'yellow';
-    return 'gray';
+    return 'gray'; // fallback
   };
 
   const getMarkerDescription = (sighting) => {
@@ -222,7 +364,7 @@ function MapScreen({ navigation, route }) {
     });
 
     const uniqueMarkers = Object.values(groupedMarkers);
-    console.log('👥 Unique markers after grouping:', uniqueMarkers.length);
+    console.log('Unique markers after grouping:', uniqueMarkers.length);
     
     return uniqueMarkers;
   };
@@ -302,7 +444,7 @@ function MapScreen({ navigation, route }) {
       await clearOldSightings();
       setupFirebaseListener();
       setLoading(false);
-      console.log("🔄 Map refreshed successfully");
+      console.log("Map refreshed successfully");
     } catch (error) {
       console.error("Error refreshing map:", error);
       setLoading(false);
@@ -329,7 +471,7 @@ function MapScreen({ navigation, route }) {
       };
       
       setMapRegion(newRegion);
-      console.log('🎯 Centered map on markers');
+      console.log('Centered map on markers');
     }
   };
 
@@ -367,8 +509,8 @@ function MapScreen({ navigation, route }) {
   }
 
   const validMarkers = getValidMarkers();
-  console.log('🗺️ Rendering markers:', validMarkers.length, 'valid out of', sightings.length, 'total');
-  console.log('📊 Marker status breakdown:', {
+  console.log(' endering markers:', validMarkers.length, 'valid out of', sightings.length, 'total');
+  console.log('Marker status breakdown:', {
     verified: validMarkers.filter(m => m.status === 'verified').length,
     pending: validMarkers.filter(m => m.status === 'pending').length
   });
@@ -381,7 +523,7 @@ function MapScreen({ navigation, route }) {
         region={mapRegion} 
         showsUserLocation={true}
         showsMyLocationButton={true}
-        onMapReady={() => console.log('🗺️ Map is ready')}
+        onMapReady={() => console.log('Map is ready')}
       >
         {/* Current user location */}
         {location && (
@@ -398,7 +540,7 @@ function MapScreen({ navigation, route }) {
         
         {/* Food truck sightings - Only valid markers */}
         {validMarkers.map((sighting) => {
-          const markerColor = getMarkerColor(sighting.status, sighting.crowdLevel);
+          const markerColor = getMarkerColor(sighting.crowdLevel);
           console.log(`📍 Rendering marker: ${sighting.foodTruckName} with color: ${markerColor} (status: ${sighting.status})`);
 
           const isFavorited = favorites && favorites.includes(sighting.foodTruckName);
@@ -414,6 +556,7 @@ function MapScreen({ navigation, route }) {
               title={sighting.foodTruckName}
               description={getMarkerDescription(sighting)}
               pinColor={markerColor}
+              onPress={() => openTruckSheet(sighting)}
               onCalloutPress={() => toggleFavorite(sighting)}
             >
               <Callout tooltip={false} onPress={() => { /* noop */ }}>
@@ -436,6 +579,159 @@ function MapScreen({ navigation, route }) {
           );
         })}
       </MapView>
+
+      {/* Truck detail bottom-sheet */}
+      <Modal
+        animationType="slide"
+        transparent
+        visible={sheetVisible}
+        onRequestClose={() => setSheetVisible(false)}
+      >
+        <View style={styles.sheetBackdrop}>
+          {/* tap backdrop to close */}
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setSheetVisible(false)} />
+          <View style={styles.sheet}>
+            {selected && (
+              <>
+                {/* Header */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                  {/* Placeholder image */}
+                  <View style={{
+                    width: 52, height: 52, borderRadius: 10, backgroundColor: '#eee', marginRight: 12,
+                    alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    <Text>📷</Text>
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 18, fontWeight: '700' }}>{selected.foodTruckName}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                      <View style={{ paddingHorizontal: 8, paddingVertical: 4, backgroundColor: '#f1f5f9', borderRadius: 6, marginRight: 8 }}>
+                        <Text style={{ fontSize: 12 }}>{selected.cuisineType || '—'}</Text>
+                      </View>
+                      <Text>⭐ 4.8</Text>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity onPress={() => setSheetVisible(false)}>
+                    <Text style={{ fontSize: 18 }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Stats row (compact 2x2 like the mock) */}
+                {(() => {
+                  const hasLoc = !!location && !!selected?.location;
+                  const distM = hasLoc
+                    ? distanceMeters(
+                        location.latitude, location.longitude,
+                        selected.location.latitude, selected.location.longitude
+                      )
+                    : null;
+                  const mins = distM != null ? Math.max(1, Math.round(distM / 80)) : null; // ~80 m/min walk
+                  const miles = distM != null ? (distM / 1609.34).toFixed(1) : null;
+
+                  return (
+                    <>
+                      <View style={styles.statGrid}>
+                        {/* Left column: time + distance */}
+                        <View style={styles.statCol}>
+                          <View style={styles.statItem}>
+                            <Text style={styles.statIcon}>🕒</Text>
+                            <Text style={styles.statText}>{mins != null ? `${mins} min` : '—'}</Text>
+                          </View>
+                          <View style={styles.statItem}>
+                            <Text style={styles.statIcon}>📍</Text>
+                            <Text style={styles.statText}>{miles != null ? `${miles} mi` : '—'}</Text>
+                          </View>
+                        </View>
+
+                        {/* Right column: crowd + confirmed time */}
+                        <View style={styles.statCol}>
+                          <View style={styles.statItem}>
+                            <Text style={styles.statIcon}>👥</Text>
+                            <Text style={[styles.statText, { color: getCrowdTextColor(selected.crowdLevel), fontWeight: '600' }]}>
+                              {selected.crowdLevel ? `${selected.crowdLevel} crowd` : '—'}
+                            </Text>
+                          </View>
+                          <View style={styles.statItem}>
+                            <Text style={styles.statIcon}>✔︎</Text>
+                            <Text style={styles.statText}>
+                              {lastConfirmedMin != null ? `Confirmed ${lastConfirmedMin} min ago` : 'Confirmed recently'}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      <View style={styles.statDivider} />
+                    </>
+                  );
+                })()}
+
+                {/* Description */}
+                <View style={{ marginTop: 6 }}>
+                  <Text style={{ fontSize: 14, color: '#444' }}>
+                    {selected.additionalNotes?.trim() || 'No description yet.'}
+                  </Text>
+                </View>
+
+                {/* Popular items */}
+                <View style={{ marginTop: 12 }}>
+                  <Text style={{ fontWeight: '700', marginBottom: 6 }}>Popular Items</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                    {(popular.length ? popular : ['Carne Asada','Fish Tacos','Carnitas','Elote']).map((item, i) => (
+                      <View key={i} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#f0f0f0', borderRadius: 16, marginRight: 6, marginBottom: 6 }}>
+                        <Text>{item}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Confirmation count */}
+                <View style={{ marginTop: 12 }}>
+                  <Text style={{ fontSize: 12, color: '#666' }}>
+                    Location confirmed by {Math.max(confirmCount, 1)} user{Math.max(confirmCount, 1) === 1 ? '' : 's'}
+                  </Text>
+                </View>
+
+                {/* Actions */}
+                <View style={{ flexDirection: 'row', marginTop: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => Alert.alert('Thanks!', 'Your confirmation has been recorded (prototype).')}
+                    style={{ paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#f5f5f5', borderRadius: 10, marginRight: 10 }}
+                  >
+                    <Text>✅ Confirm</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      setSheetVisible(false);
+                      navigation.navigate('Report');
+                    }}
+                    style={{ paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#f5f5f5', borderRadius: 10 }}
+                  >
+                    <Text>🚩 Report</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Navigate CTA */}
+                <TouchableOpacity
+                  onPress={() => {
+                    const { latitude, longitude } = selected.location;
+                    const url = Platform.select({
+                      ios: `http://maps.apple.com/?daddr=${latitude},${longitude}`,
+                      android: `geo:0,0?q=${latitude},${longitude}(${encodeURIComponent(selected.foodTruckName)})`,
+                    });
+                    Linking.openURL(url);
+                  }}
+                  style={{ marginTop: 16, backgroundColor: '#0B0B14', padding: 14, borderRadius: 12, alignItems: 'center' }}
+                >
+                  <Text style={{ color: 'white', fontWeight: '700' }}>▸ Navigate to {selected.foodTruckName}</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
       
       {/* Debug Panel */}
       {showDebug && (
@@ -455,11 +751,44 @@ function MapScreen({ navigation, route }) {
             </Text>
           ))}
           <TouchableOpacity onPress={centerOnMarkers} style={styles.debugButton}>
-            <Text style={styles.debugButtonText}>🎯 Center on Markers</Text>
+            <Text style={styles.debugButtonText}> Center on Markers</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={handleRefresh} style={[styles.debugButton, { backgroundColor: '#FF9500', marginTop: 5 }]}>
-            <Text style={styles.debugButtonText}>🔄 Force Refresh</Text>
+            <Text style={styles.debugButtonText}> Force Refresh</Text>
           </TouchableOpacity>
+
+          {/* Debug input for delete-by-name */}
+          <View style={{ marginTop: 10 }}>
+            <Text style={[styles.debugText, { fontWeight: '700', marginBottom: 4 }]}>
+              Danger Zone (Dev)
+            </Text>
+
+            <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+              <Text style={[styles.debugText, { width: 80 }]}>Truck:</Text>
+              <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 6, paddingHorizontal: 8 }}>
+                <TextInput
+                  placeholder="Enter exact name"
+                  onChangeText={(t) => setDevDeleteName(t)}
+                  value={devDeleteName}
+                  style={{ height: 34 }}
+                />
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => deleteByTruckName(devDeleteName)}
+              style={[styles.debugButton, { backgroundColor: '#D0021B', marginTop: 6 }]}
+            >
+              <Text style={styles.debugButtonText}> Delete by Truck Name</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={deleteAllSightings}
+              style={[styles.debugButton, { backgroundColor: '#9500FF', marginTop: 6 }]}
+            >
+              <Text style={styles.debugButtonText}> Delete ALL Sightings</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
       
@@ -467,23 +796,15 @@ function MapScreen({ navigation, route }) {
         <Text style={styles.legendTitle}>Map Legend</Text>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'green' }]} />
-          <Text style={styles.legendText}>Verified</Text>
+          <Text style={styles.legendText}>Light</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: 'gray' }]} />
-          <Text style={styles.legendText}>Pending</Text>
+          <View style={[styles.legendColor, { backgroundColor: 'yellow' }]} />
+          <Text style={styles.legendText}>Moderate</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'red' }]} />
           <Text style={styles.legendText}>Busy</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: 'orange' }]} />
-          <Text style={styles.legendText}>Moderate</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: 'yellow' }]} />
-          <Text style={styles.legendText}>Light Crowd</Text>
         </View>
       </View>
 
@@ -667,4 +988,45 @@ const styles = StyleSheet.create({
   pinStyle: { backgroundColor: '#007AFF' },
   unpinStyle: { backgroundColor: '#FF3B30' },
   calloutNote: { fontSize: 12, color: '#666' },
+
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '85%',
+  },
+  statGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  statCol: { flex: 1 },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  statIcon: {
+    width: 18,
+    textAlign: 'center',
+    marginRight: 6,
+    color: '#6B7280', // gray-600
+  },
+  statText: {
+    fontSize: 12,
+    color: '#6B7280', // gray-600
+  },
+  statDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB', // gray-200
+    marginTop: 6,
+    marginBottom: 8,
+  },
 });

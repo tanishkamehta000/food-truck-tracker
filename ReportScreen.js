@@ -37,6 +37,8 @@ const CUISINE_TYPES = [
 const INVENTORY_LEVELS = ['Plenty', 'Running Low', 'Almost Out'];
 
 export default function ReportScreen({ navigation }) {
+  const [favoriteItemInput, setFavoriteItemInput] = useState('');
+  const [favoriteItems, setFavoriteItems] = useState([]);
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState('');
   const [foodTruckName, setFoodTruckName] = useState('');
@@ -379,6 +381,7 @@ const simulateMultipleUsers = async () => {
         reporterId: uniqueUserId,
         confirmationCount: 1,
         verifiedBy: userType,
+        favoriteItems,
 };
   
       // Add the new report to Firebase
@@ -625,6 +628,44 @@ const simulateMultipleUsers = async () => {
         numberOfLines={3}
         maxLength={200}
       />
+    </View>
+
+    <View style={styles.section}>
+      <Text style={styles.label}>Popular Items (Optional)</Text>
+      <View style={{ flexDirection: 'row' }}>
+        <TextInput
+          style={[styles.textInput, { flex: 1, marginRight: 8 }]}
+          placeholder="Add an item, e.g., Carne Asada"
+          value={favoriteItemInput}
+          onChangeText={setFavoriteItemInput}
+          onSubmitEditing={() => {
+            if (favoriteItemInput.trim().length) {
+              setFavoriteItems(prev => [...prev, favoriteItemInput.trim()]);
+              setFavoriteItemInput('');
+            }
+          }}
+        />
+        <TouchableOpacity
+          style={[styles.submitButton, { paddingHorizontal: 12 }]}
+          onPress={() => {
+            if (favoriteItemInput.trim().length) {
+              setFavoriteItems(prev => [...prev, favoriteItemInput.trim()]);
+              setFavoriteItemInput('');
+            }
+          }}
+        >
+          <Text style={styles.submitButtonText}>Add</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* chips */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 }}>
+        {favoriteItems.map((it, i) => (
+          <View key={i} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#f0f0f0', borderRadius: 16, marginRight: 6, marginBottom: 6 }}>
+            <Text>{it}</Text>
+          </View>
+        ))}
+      </View>
     </View>
 
     <View style={[styles.verificationSection, isVendor && styles.vendorVerificationSection]}>
