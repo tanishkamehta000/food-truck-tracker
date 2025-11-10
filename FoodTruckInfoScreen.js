@@ -14,6 +14,8 @@ import { trackModalAction } from './analytics';
 export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm, onReportIssue, onToggleFavorite, isFavorited, userType, userLocation }) {
   if (!truck) return null;
 
+//finished food truck info page for Version B
+
   const handleNavigate = () => {
     const { latitude, longitude } = truck.location;
     const url = `https://maps.apple.com/?daddr=${latitude},${longitude}`;
@@ -64,7 +66,7 @@ export default function FoodTruckInfoScreen({ visible, truck, onClose, onConfirm
       Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     const distanceKm = R * c;
-    const distanceMiles = distanceKm * 0.621371; // Convert to miles
+    const distanceMiles = distanceKm * 0.621371; // convert to miles
     return distanceMiles.toFixed(1);
   };
 
