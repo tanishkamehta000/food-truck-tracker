@@ -14,7 +14,7 @@ let sessionMetrics = {
   navigationsStarted: 0,
 };
 
-// Initialize session
+// initializing session
 export const initSession = async () => {
   sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   sessionStartTime = Date.now();
@@ -35,10 +35,10 @@ export const initSession = async () => {
   return { sessionId, userEmail, userType };
 };
 
-// Get current session
+// getting current session for now
 export const getSessionId = () => sessionId;
 
-// Track event
+// some event
 export const trackEvent = async (eventName, eventData = {}) => {
   try {
     const userEmail = await AsyncStorage.getItem('userEmail');
@@ -53,13 +53,13 @@ export const trackEvent = async (eventName, eventData = {}) => {
       ...eventData,
     };
     
-    // Log locally
+    //logs
     console.log('📊 Analytics:', eventName, eventData);
     
-    // Save to Firebase
+    
     await addDoc(collection(db, 'analytics'), analyticsData);
     
-    // Update session metrics
+    
     updateSessionMetrics(eventName);
     
   } catch (error) {
@@ -67,7 +67,7 @@ export const trackEvent = async (eventName, eventData = {}) => {
   }
 };
 
-// Update session metrics based on event
+
 const updateSessionMetrics = (eventName) => {
   switch (eventName) {
     case 'report_submitted':
@@ -94,7 +94,7 @@ const updateSessionMetrics = (eventName) => {
   }
 };
 
-// End session and save summary
+
 export const endSession = async () => {
   if (!sessionId) return;
   
@@ -130,7 +130,7 @@ export const endSession = async () => {
   sessionStartTime = null;
 };
 
-// Performance tracking
+//tracking
 export const trackPerformance = async (metricName, durationMs, metadata = {}) => {
   await trackEvent('performance_metric', {
     metricName,
@@ -140,7 +140,7 @@ export const trackPerformance = async (metricName, durationMs, metadata = {}) =>
   });
 };
 
-// Specific tracking functions
+
 export const trackReportSubmission = async (startTime, truckName, success) => {
   const latency = Date.now() - startTime;
   await trackPerformance('report_submission_latency', latency, {
@@ -202,7 +202,7 @@ export const trackVerification = async (truckName, startTime, confirmationCount)
     truckName,
     confirmationCount,
     verificationMinutes,
-    meetsSLA: verificationMinutes < 10, // Goal: < 10 minutes
+    meetsSLA: verificationMinutes < 10, // hopefully less than 10 minutes but since we're testing with not a lot of users probably not
   });
   
   await trackEvent('truck_verified', {
