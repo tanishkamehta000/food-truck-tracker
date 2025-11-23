@@ -39,3 +39,5 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+food-truck-tracker-77775-firebase-adminsdk-fbsvc-c5e205c692.json

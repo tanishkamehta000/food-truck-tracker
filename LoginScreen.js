@@ -14,16 +14,18 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
+  signOut,
 } from "firebase/auth";
 import { auth } from "./firebaseConfig";
+import { registerForPushNotificationsAsync } from './notifications';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("user");
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false); // Toggle between login and sign up
-
+  const [isSignUp, setIsSignUp] = useState(false);
   const handleAuth = async () => {
     if (!email || !password) {
       Alert.alert("Error", "Please enter both email and password.");
@@ -35,22 +37,57 @@ export default function LoginScreen({ navigation }) {
     try {
       let userCredential;
       if (isSignUp) {
-        // Sign up new user
         userCredential = await createUserWithEmailAndPassword(auth, email, password);
+
+        try {
+          await sendEmailVerification(userCredential.user);
+          Alert.alert(
+            'Verify your email',
+            'A verification email has been sent. Please check your inbox and verify your email before logging in.'
+          );
+        } catch (err) {
+          console.error('sendEmailVerification error', err);
+          Alert.alert('Error', 'Could not send verification email. Please try again later.');
+        }
+
+        try { await signOut(auth); } catch (e) { /* ignore */ }
+
+        setIsSignUp(false);
+        setLoading(false);
+        return;
       } else {
-        // Login existing user
         userCredential = await signInWithEmailAndPassword(auth, email, password);
+
+        if (!userCredential.user.emailVerified) {
+          try {
+            await sendEmailVerification(userCredential.user);
+            Alert.alert('Email not verified', 'A verification email was sent. Please verify your email and then log in.');
+          } catch (err) {
+            console.error('sendEmailVerification on login error', err);
+            Alert.alert('Email not verified', 'Please verify your email before logging in.');
+          }
+
+          try { await signOut(auth); } catch (e) { /* ignore */ }
+          setLoading(false);
+          return;
+        }
+
+        await AsyncStorage.setItem('userType', role);
+        await AsyncStorage.setItem('userEmail', email);
+
+        try {
+          const token = await registerForPushNotificationsAsync(email);
+          if (token) console.log('Push token registered after auth:', token);
+        } catch (e) {
+          console.warn('Unable to register push token after auth', e);
+        }
+
+        console.log(`Logged in as ${email} (${role})`);
+        navigation.replace('MainApp');
       }
-
-      // Store user info locally
-      await AsyncStorage.setItem("userType", role);
-      await AsyncStorage.setItem("userEmail", email);
-
-      console.log(`${isSignUp ? "Signed up" : "Logged in"} as ${email} (${role})`);
-      navigation.replace("MainApp");
     } catch (error) {
-      console.error("Auth error:", error.message);
-      Alert.alert("Error", error.message);
+      console.error('Auth error:', error.message);
+      Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
     }

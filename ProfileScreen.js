@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, auth } from './firebaseConfig';
@@ -21,14 +22,59 @@ import {
   arrayRemove,
   onSnapshot,
 } from 'firebase/firestore';
+import { listenToUserSubscriptions, subscribeToTruck, unsubscribeFromTruck, getCurrentPushToken, registerForPushNotificationsAsync } from './notifications';
+
+function NotificationToggle({ truckId, userEmail, subscribed }) {
+  const [loading, setLoading] = React.useState(false);
+
+  const handleToggle = async () => {
+    setLoading(true);
+    try {
+      const token = await getCurrentPushToken(userEmail);
+      if (!token) {
+        alert('Push notifications not enabled on this device. Go to Login and enable notifications.');
+        setLoading(false);
+        return;
+      }
+
+      if (subscribed) {
+        await unsubscribeFromTruck(userEmail, token, truckId);
+      } else {
+        await subscribeToTruck(userEmail, token, truckId);
+      }
+    } catch (err) {
+      console.error('Notification toggle error', err);
+      alert('Unable to update notification preference.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      style={[styles.notifyButton, subscribed ? styles.notifyOn : styles.notifyOff]}
+      onPress={handleToggle}
+      disabled={loading}
+    >
+      {loading ? (
+        <ActivityIndicator color="#fff" />
+      ) : (
+        <Text style={styles.notifyText}>{subscribed ? 'Stop 🔕' : 'Notify 🔔'}</Text>
+      )}
+    </TouchableOpacity>
+  );
+}
 
 export default function ProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
 
+  const [phoneNumber, setPhoneNumber] = useState('');
+
   // user
   const [favorites, setFavorites] = useState([]);
+  const [subscribedTrucks, setSubscribedTrucks] = useState([]);
   const [cuisine, setCuisine] = useState('Any');
 
   // vendor
@@ -40,17 +86,27 @@ export default function ProfileScreen({ navigation }) {
     (async () => {
       const type = await AsyncStorage.getItem('userType');
       const email = await AsyncStorage.getItem('userEmail');
-      const prefCuisine = await AsyncStorage.getItem('preferredCuisine');
-      if (prefCuisine) setCuisine(prefCuisine);
       setUserType(type);
       setUserEmail(email);
+      // load phone number from users/{email}
+      if (email) {
+        try {
+          const userRef = doc(db, 'users', email);
+          const snap = await getDoc(userRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            if (data.phoneNumber) setPhoneNumber(data.phoneNumber);
+          }
+        } catch (err) {
+          console.warn('Could not load phone number', err);
+        }
+      }
       setLoading(false);
     })();
   }, []);
 
   const handleLogout = async () => {
     try {
-      // Firebase sign out
       await signOut(auth);
     } catch (err) {
       console.warn('signOut error', err);
@@ -64,11 +120,9 @@ export default function ProfileScreen({ navigation }) {
       console.warn('AsyncStorage clear error', err);
     }
 
-    // Reset navigation to Login screen
     try {
       navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } catch (err) {
-      // fallback
       navigation.navigate('Login');
     }
   };
@@ -87,7 +141,9 @@ export default function ProfileScreen({ navigation }) {
         }
       }, (err) => console.error('favorites onSnapshot error', err));
 
-      return () => unsub();
+      const unsubSubs = listenToUserSubscriptions(userEmail, (list) => setSubscribedTrucks(list || []));
+
+      return () => { unsub(); if (typeof unsubSubs === 'function') unsubSubs(); };
     }
 
     if (userType === 'vendor') {
@@ -119,7 +175,6 @@ export default function ProfileScreen({ navigation }) {
       const ref = doc(db, 'favorites', userEmail);
       await updateDoc(ref, { favorites: arrayRemove(truckName) });
     } catch (err) {
-      // If doc doesn't exist, catch and show message
       console.error('unpin error', err);
       Alert.alert('Error', 'Unable to remove favorite.');
     }
@@ -149,7 +204,6 @@ export default function ProfileScreen({ navigation }) {
         const ref = doc(db, 'vendors', userEmail);
         await updateDoc(ref, { cuisine: value });
       } catch (err) {
-        // If doc doesn't exist, create it with cuisine
         try {
           const ref = doc(db, 'vendors', userEmail);
           await setDoc(ref, { cuisine: value });
@@ -158,14 +212,7 @@ export default function ProfileScreen({ navigation }) {
           Alert.alert('Error', 'Could not save cuisine');
         }
       }
-    } else {
-      // user preference locally
-      try {
-        await AsyncStorage.setItem('preferredCuisine', value);
-      } catch (err) {
-        console.error('AsyncStorage save cuisine error', err);
-      }
-    }
+  };
   };
 
   const addMenuItem = () => {
@@ -180,7 +227,7 @@ export default function ProfileScreen({ navigation }) {
       return;
     }
 
-    // Round to 2 decimals for storage
+    // Round to 2 decimals
     const priceNumber = Math.round(parsed * 100) / 100;
 
     const item = { name: newItemName.trim(), price: priceNumber };
@@ -230,14 +277,129 @@ export default function ProfileScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      {userType === 'vendor' && (
+        <View style={{ marginBottom: 12 }}>
+          <Text style={{ fontWeight: '600', marginBottom: 6 }}>Cuisine</Text>
+          <View style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, overflow: 'hidden' }}>
+            <Picker selectedValue={cuisine} onValueChange={handleCuisineChange}>
+              {cuisineOptions.map((c) => (
+                <Picker.Item key={c} label={c} value={c} />
+              ))}
+            </Picker>
+          </View>
+        </View>
+      )}
+
+      {/* Phone number (stored in users/{email}) */}
       <View style={{ marginBottom: 12 }}>
-        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Cuisine</Text>
-        <View style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, overflow: 'hidden' }}>
-          <Picker selectedValue={cuisine} onValueChange={handleCuisineChange}>
-            {cuisineOptions.map((c) => (
-              <Picker.Item key={c} label={c} value={c} />
-            ))}
-          </Picker>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>Phone number</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TextInput
+            placeholder="(555) 555-5555"
+            value={phoneNumber}
+            onChangeText={setPhoneNumber}
+            style={[styles.input, { flex: 1 }]}
+            keyboardType="phone-pad"
+            returnKeyType="done"
+            blurOnSubmit={true}
+            onSubmitEditing={() => Keyboard.dismiss()}
+          />
+          <TouchableOpacity
+            style={[styles.saveButton, { marginLeft: 8 }]}
+            onPress={async () => {
+              Keyboard.dismiss();
+              if (!userEmail) return Alert.alert('Not logged in', 'Please log in to save phone number.');
+              try {
+                const userRef = doc(db, 'users', userEmail);
+                await setDoc(userRef, { phoneNumber }, { merge: true });
+                Alert.alert('Saved', 'Phone number saved.');
+              } catch (err) {
+                console.error('save phone error', err);
+                Alert.alert('Error', 'Could not save phone number.');
+              }
+            }}
+          >
+            <Text style={styles.saveText}>Save</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mapButton, { marginLeft: 8 }]}
+            onPress={async () => {
+              if (!userEmail) return Alert.alert('Not logged in', 'Please log in to view push token.');
+              try {
+                let token = await getCurrentPushToken(userEmail);
+                if (!token) {
+                  // try registering anew
+                  token = await registerForPushNotificationsAsync(userEmail);
+                }
+                Alert.alert('Push Token', token || 'No push token available');
+              } catch (err) {
+                console.error('show token error', err);
+                Alert.alert('Error', 'Could not retrieve push token.');
+              }
+            }}
+          >
+            <Text style={styles.mapButtonText}>Show Push Token</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mapButton, { marginLeft: 8 }]}
+            onPress={async () => {
+              if (!userEmail) return Alert.alert('Not logged in', 'Please log in to receive test notifications.');
+              try {
+                let token = await getCurrentPushToken(userEmail);
+                if (!token) {
+                  token = await registerForPushNotificationsAsync(userEmail);
+                }
+                if (!token) {
+                  return Alert.alert('No token', 'No push token available to send a test.');
+                }
+
+                // Quick token type check: Expo tokens start with "ExponentPushToken["
+                const isExpoToken = typeof token === 'string' && token.startsWith('ExponentPushToken[');
+                if (!isExpoToken) {
+                  return Alert.alert(
+                    'Not an Expo token',
+                    'The token returned is not an Expo push token (it looks like a native FCM/APNs token).\n\n' +
+                    'Options:\n' +
+                    '• Run the local send script (uses Firebase admin) to send to native tokens.\n' +
+                    '• Open the app in Expo Go to get an Expo token (ExponentPushToken[...]) and then use Send Test Push.\n' +
+                    '\nTell me which you prefer and I can help with the next steps.'
+                  );
+                }
+
+                const message = {
+                  to: token,
+                  title: 'Food Truck Tracker — Test',
+                  body: 'This is a test notification sent from your device.',
+                  data: { test: 'true' },
+                };
+
+                const res = await fetch('https://exp.host/--/api/v2/push/send', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(message),
+                });
+
+                const json = await res.json().catch(() => null);
+                if (!res.ok) {
+                  console.error('Expo push send failed', res.status, json);
+                  return Alert.alert('Send failed', JSON.stringify(json) || `Status ${res.status}`);
+                }
+
+                // The API may return an object with data or errors
+                if (json && json.data && json.data.status === 'error') {
+                  return Alert.alert('Send error', json.data.message || 'Unknown error');
+                }
+
+                Alert.alert('Sent', 'Test notification sent — check your device.');
+              } catch (err) {
+                console.error('send test push error', err);
+                Alert.alert('Error', err.message || String(err));
+              }
+            }}
+          >
+            <Text style={styles.mapButtonText}>Send Test Push</Text>
+          </TouchableOpacity>
+          {/* Debug buttons removed to keep profile UI minimal during testing. */}
         </View>
       </View>
 
@@ -262,9 +424,18 @@ export default function ProfileScreen({ navigation }) {
                       <Text style={styles.mapButtonText}>See on map 🗺️</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.unpinButton} onPress={() => unpin(item)}>
-                      <Text style={styles.unpinText}>Unpin</Text>
-                    </TouchableOpacity>
+                        <TouchableOpacity style={styles.unpinButton} onPress={() => unpin(item)}>
+                          <Text style={styles.unpinText}>Unpin</Text>
+                        </TouchableOpacity>
+
+                        {/* Notification toggle button */}
+                        {userType === 'user' && (
+                          <NotificationToggle
+                            truckId={item}
+                            userEmail={userEmail}
+                            subscribed={subscribedTrucks && subscribedTrucks.includes(item)}
+                          />
+                        )}
                   </View>
                 </View>
               )}
@@ -346,4 +517,8 @@ const styles = StyleSheet.create({
   deleteText: { color: 'white', fontWeight: '600' },
   saveButton: { backgroundColor: '#34C759', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 12 },
   saveText: { color: 'white', fontWeight: '700' },
+  notifyButton: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, marginLeft: 8 },
+  notifyOn: { backgroundColor: '#FF9500' },
+  notifyOff: { backgroundColor: '#007AFF' },
+  notifyText: { color: 'white', fontWeight: '700' },
 });
