@@ -12,6 +12,9 @@ import ReportScreen from './ReportScreen';
 import LoginScreen from "./LoginScreen";
 import ProfileScreen from './ProfileScreen';
 import AsyncStorage from "@react-native-async-storage/async-storage";
+//testing these need to verify w/ Tanishka and Alvin that this is working
+import VendorPhotoVerificationScreen from './VendorPhotoVerificationScreen';
+import VendorPendingScreen from './VendorPendingScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -537,6 +540,8 @@ function MainApp() {
         {() => (
           <Stack.Navigator>
             <Stack.Screen name="Food Truck Map" component={MapScreen} options={{ title: "Food Truck Map" }} />
+            <Stack.Screen name="VendorPhotoVerification" component={VendorPhotoVerificationScreen} options={{ title: 'Vendor Verification' }} />
+            <Stack.Screen name="VendorPendingScreen" component={VendorPendingScreen} options={{ title: 'Verification Pending', headerLeft: () => null }} />
           </Stack.Navigator>
         )}
       </Tab.Screen>
