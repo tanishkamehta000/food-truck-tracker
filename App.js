@@ -34,6 +34,7 @@ function MapScreen({ navigation, route }) {
   const [showDebug, setShowDebug] = useState(true);
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
+  const [userId, setUserId] = useState(null);
   const [favorites, setFavorites] = useState([]);
   const mapRef = useRef(null);
   const markerRefs = useRef({});
@@ -61,18 +62,21 @@ function MapScreen({ navigation, route }) {
     (async () => {
       const type = await AsyncStorage.getItem('userType');
       const email = await AsyncStorage.getItem('userEmail');
+      const id = await AsyncStorage.getItem('userId');
       setUserType(type);
       setUserEmail(email);
+      setUserId(id);
     })();
   }, []);
 
   useEffect(() => {
-    if (!userEmail || userType !== 'user') {
+    if (!(userId || userEmail) || userType !== 'user') {
       setFavorites([]);
       return;
     }
 
-    const favRef = doc(db, 'favorites', userEmail);
+    const docKey = userId || userEmail;
+    const favRef = doc(db, 'favorites', docKey);
     const unsub = onSnapshot(favRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -83,7 +87,7 @@ function MapScreen({ navigation, route }) {
     }, (err) => console.error('favorites onSnapshot error (map):', err));
 
     return () => unsub();
-  }, [userEmail, userType]);
+  }, [userId, userEmail, userType]);
 
   // truck focus
   useEffect(() => {
@@ -253,7 +257,7 @@ function MapScreen({ navigation, route }) {
 
   const toggleFavorite = async (sighting) => {
     console.log('toggleFavorite called for', sighting.foodTruckName);
-    if (!userEmail) {
+    if (!(userId || userEmail)) {
       Alert.alert('Not logged in', 'Please log in to pin trucks.');
       return;
     }
@@ -264,7 +268,8 @@ function MapScreen({ navigation, route }) {
     }
 
     const name = sighting.foodTruckName;
-    const favRef = doc(db, 'favorites', userEmail);
+    const docKey = userId || userEmail;
+    const favRef = doc(db, 'favorites', docKey);
 
     try {
       const isFavorited = favorites && favorites.includes(name);

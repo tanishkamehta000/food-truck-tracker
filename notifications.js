@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, setDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot, getDoc } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 
-export async function registerForPushNotificationsAsync(userEmail) {
+export async function registerForPushNotificationsAsync(userId) {
   try {
     if (!Device.isDevice) {
       console.log('Push notifications are not supported on emulators/simulators. Use a physical device.');
@@ -58,11 +58,11 @@ export async function registerForPushNotificationsAsync(userEmail) {
       console.warn('Unable to persist push token locally', e);
     }
 
-    // Save token to Firestore under users/{email}.pushTokens map
+    // Save token to Firestore under users/{userId}.pushTokens map
     try {
-      const userRef = doc(db, 'users', userEmail);
+      const userRef = doc(db, 'users', userId);
       await setDoc(userRef, { pushTokens: { [pushToken]: { createdAt: new Date().toISOString(), platform: Device.osName || 'unknown' } } }, { merge: true });
-      console.log('Saved push token to Firestore for', userEmail);
+      console.log('Saved push token to Firestore for', userId);
     } catch (err) {
       console.error('Error saving push token to Firestore', err);
     }
@@ -74,15 +74,15 @@ export async function registerForPushNotificationsAsync(userEmail) {
   }
 }
 
-export async function subscribeToTruck(userEmail, pushToken, truckId) {
-  if (!userEmail || !pushToken || !truckId) return;
+export async function subscribeToTruck(userId, pushToken, truckId) {
+  if (!userId || !pushToken || !truckId) return;
 
   try {
-    const userRef = doc(db, 'users', userEmail);
+    const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, { subscribedTrucks: arrayUnion(truckId) });
   } catch (err) {
     try {
-      const userRef = doc(db, 'users', userEmail);
+      const userRef = doc(db, 'users', userId);
       await setDoc(userRef, { subscribedTrucks: [truckId] }, { merge: true });
     } catch (e) {
       console.error('subscribeToTruck: could not update user doc', e);
@@ -97,11 +97,11 @@ export async function subscribeToTruck(userEmail, pushToken, truckId) {
   }
 }
 
-export async function unsubscribeFromTruck(userEmail, pushToken, truckId) {
-  if (!userEmail || !pushToken || !truckId) return;
+export async function unsubscribeFromTruck(userId, pushToken, truckId) {
+  if (!userId || !pushToken || !truckId) return;
 
   try {
-    const userRef = doc(db, 'users', userEmail);
+    const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, { subscribedTrucks: arrayRemove(truckId) });
   } catch (err) {
     console.warn('unsubscribeFromTruck: user update failed', err);
@@ -115,9 +115,9 @@ export async function unsubscribeFromTruck(userEmail, pushToken, truckId) {
   }
 }
 
-export function listenToUserSubscriptions(userEmail, onChange) {
-  if (!userEmail) return () => {};
-  const ref = doc(db, 'users', userEmail);
+export function listenToUserSubscriptions(userId, onChange) {
+  if (!userId) return () => {};
+  const ref = doc(db, 'users', userId);
   const unsub = onSnapshot(ref, (snap) => {
     if (snap.exists()) {
       const data = snap.data();
@@ -133,13 +133,13 @@ export function listenToUserSubscriptions(userEmail, onChange) {
   return unsub;
 }
 
-export async function getCurrentPushToken(userEmail) {
+export async function getCurrentPushToken(userId) {
   try {
     const local = await AsyncStorage.getItem('pushToken');
     if (local) return local;
 
-    if (!userEmail) return null;
-    const userRef = doc(db, 'users', userEmail);
+    if (!userId) return null;
+    const userRef = doc(db, 'users', userId);
     const snap = await getDoc(userRef);
     if (!snap.exists()) return null;
     const data = snap.data();

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import * as Location from 'expo-location';
 import { db } from './firebaseConfig';
-import { collection, addDoc, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc } from 'firebase/firestore';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const CUISINE_TYPES = [
@@ -47,6 +47,7 @@ export default function ReportScreen({ navigation }) {
   const [locationLoading, setLocationLoading] = useState(true);
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState("");
+  const [userId, setUserId] = useState(null);
   const [inventoryLevel, setInventoryLevel] = useState('');
   const [vendorProfile, setVendorProfile] = useState(null); //both of these are for inventory level and vendor profile
 
@@ -57,12 +58,14 @@ export default function ReportScreen({ navigation }) {
     const loadUserInfo = async () => {
       const type = await AsyncStorage.getItem("userType");
       const email = await AsyncStorage.getItem("userEmail");
+      const id = await AsyncStorage.getItem('userId');
       setUserType(type || "user");
       setUserEmail(email || "");
+      setUserId(id || null);
 
-
-      if (type == "vendor" && email) {
-        await loadVendorProfile(email);
+      if (type == "vendor") {
+        const docKey = id || email;
+        if (docKey) await loadVendorProfile(docKey, email);
       }
     };
   
@@ -71,28 +74,45 @@ export default function ReportScreen({ navigation }) {
 
 
   //adding a new load vendor profile method
-  const loadVendorProfile = async (email) => {
+  const loadVendorProfile = async (docKey, emailFallback) => {
     try {
-      const vendorsRef = collection(db, 'vendors');
-      const q = query(vendorsRef, where('email', '==', email));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        const vendorData = querySnapshot.docs[0].data();
-        setVendorProfile(vendorData);
-        // Auto-fill truck info from profile
-        setFoodTruckName(vendorData.truckName || '');
-        setCuisineType(vendorData.cuisineType || '');
-        console.log('✅ Loaded vendor profile:', vendorData);
-      } else {
-        console.log('⚠️ No vendor profile found for:', email);
-        // TODO: Prompt vendor to create profile
-        Alert.alert(
-          'Profile Setup Required',
-          'Please set up your food truck profile first.',
-          [{ text: 'OK' }]
-        );
+      // Try direct doc read first (supports uid-keyed docs)
+      if (docKey) {
+        try {
+          const docRef = doc(db, 'vendors', docKey);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            const vendorData = snap.data();
+            setVendorProfile(vendorData);
+            setFoodTruckName(vendorData.truckName || '');
+            setCuisineType(vendorData.cuisineType || '');
+            console.log('✅ Loaded vendor profile (by uid):', vendorData);
+            return;
+          }
+        } catch (e) {
+          console.warn('Direct vendor doc read failed:', e);
+        }
       }
+
+      // Fallback: query by email
+      if (emailFallback) {
+        const vendorsRef = collection(db, 'vendors');
+        const q = query(vendorsRef, where('email', '==', emailFallback));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+          const vendorData = querySnapshot.docs[0].data();
+          setVendorProfile(vendorData);
+          // Auto-fill truck info from profile
+          setFoodTruckName(vendorData.truckName || '');
+          setCuisineType(vendorData.cuisineType || '');
+          console.log('✅ Loaded vendor profile (by email):', vendorData);
+          return;
+        }
+      }
+
+      console.log('⚠️ No vendor profile found for:', docKey || emailFallback);
+      Alert.alert('Profile Setup Required', 'Please set up your food truck profile first.', [{ text: 'OK' }]);
     } catch (error) {
       console.error('Error loading vendor profile:', error);
     }
@@ -376,7 +396,7 @@ const simulateMultipleUsers = async () => {
         timestamp: new Date().toISOString(),
         status: isVendor ? "verified" : "pending",
         reporterEmail: userEmail || uniqueUserId,
-        reporterId: uniqueUserId,
+        reporterId: userId || uniqueUserId,
         confirmationCount: 1,
         verifiedBy: userType,
 };

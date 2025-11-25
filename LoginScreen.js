@@ -74,9 +74,10 @@ export default function LoginScreen({ navigation }) {
 
         await AsyncStorage.setItem('userType', role);
         await AsyncStorage.setItem('userEmail', email);
+        await AsyncStorage.setItem('userId', userCredential.user.uid);
 
         try {
-          const token = await registerForPushNotificationsAsync(email);
+          const token = await registerForPushNotificationsAsync(userCredential.user.uid);
           if (token) console.log('Push token registered after auth:', token);
         } catch (e) {
           console.warn('Unable to register push token after auth', e);
