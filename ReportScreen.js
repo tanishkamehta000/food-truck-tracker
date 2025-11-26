@@ -14,6 +14,7 @@ import * as Location from 'expo-location';
 import { db } from './firebaseConfig';
 import { collection, addDoc, query, where, getDocs, updateDoc, doc, getDoc } from 'firebase/firestore';
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import VerificationReminderBanner from './VerificationReminderBanner';
 
 const CUISINE_TYPES = [
   'Mexican',
@@ -519,8 +520,11 @@ const simulateMultipleUsers = async () => {
   const isVendor = userType == "vendor";
 
   return (
+
   <ScrollView style={styles.container}>
-    {/* NEW: Vendor info banner */}
+    <VerificationReminderBanner /> 
+    
+    {/* added a vendor info banner */}
     {isVendor && vendorProfile && (
       <View style={styles.vendorInfoBanner}>
         <Text style={styles.vendorInfoLabel}>Checking in as:</Text>

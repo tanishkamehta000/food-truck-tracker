@@ -15,6 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 //testing these need to verify w/ Tanishka and Alvin that this is working
 import VendorPhotoVerificationScreen from './VendorPhotoVerificationScreen';
 import VendorPendingScreen from './VendorPendingScreen';
+import VerificationReminderBanner from './VerificationReminderBanner';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -402,6 +403,9 @@ function MapScreen({ navigation, route }) {
 
   return (
     <View style={styles.container}>
+      <VerificationReminderBanner noMargin />
+
+      <View style={{ flex: 1 }}>
       <MapView
         ref={mapRef}
         style={styles.map}
@@ -521,189 +525,15 @@ function MapScreen({ navigation, route }) {
           Total: {validMarkers.length}
         </Text>
       </View>
+      </View>
     </View>
   );
 }
 
-function VendorBlockedScreen({ screenName }) {
-  const navigation = useNavigation();
-  const [vendorStatus, setVendorStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    checkStatus();
-  }, []);
-
-  const checkStatus = async () => {
-    try {
-      const email = await AsyncStorage.getItem('userEmail');
-      if (!email) {
-        setLoading(false);
-        return;
-      }
-
-      const vendorRef = doc(db, 'vendors', email);
-      const vendorDoc = await getDoc(vendorRef);
-      
-      if (vendorDoc.exists()) {
-        const status = vendorDoc.data().verificationStatus;
-        setVendorStatus(status);
-        
-        // should auto redirect - don't show blocked screen
-        if (status === 'pending_photo') {
-          navigation.navigate('Map', { screen: 'VendorPendingScreen' });
-          return;
-        }
-      } else {
-        setVendorStatus('needs_photo');
-      }
-      
-      setLoading(false);
-    } catch (error) {
-      console.error('Error checking status:', error);
-      setLoading(false);
-    }
-  };
-
-  const handleGetVerified = () => {
-    if (vendorStatus === 'rejected') {
-      navigation.navigate('Map', { 
-        screen: 'VendorPhotoVerification', 
-        params: { truckName: 'Your Truck' } 
-      });
-    } else {
-      navigation.navigate('Map', { 
-        screen: 'VendorPhotoVerification', 
-        params: { truckName: 'Your Truck' } 
-      });
-    }
-  };
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#FF9500" />
-      </View>
-    );
-  }
-
-  // if the vendor is pending they can see that they're pending
-  if (vendorStatus === 'pending_photo') {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#FF9500" />
-        <Text style={{ marginTop: 10, color: '#666' }}>Loading verification status...</Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.blockedContainer}>
-      <View style={styles.blockedIconContainer}>
-        <Text style={styles.blockedIcon}>🔒</Text>
-      </View>
-      
-      <Text style={styles.blockedTitle}>Verification Required</Text>
-      
-      <Text style={styles.blockedMessage}>
-        {vendorStatus === 'rejected' ? (
-          <>Your verification was rejected. Please submit a new photo to get verified.</>
-        ) : (
-          <>To access the {screenName} feature, please complete vendor verification first.</>
-        )}
-      </Text>
-
-      <View style={styles.blockedInfoBox}>
-        <Text style={styles.blockedInfoText}>
-          ✓ View the map{'\n'}
-          ✗ Report/check-in{'\n'}
-          ✗ Edit profile
-        </Text>
-      </View>
-
-      <TouchableOpacity 
-        style={styles.blockedButton}
-        onPress={handleGetVerified}
-      >
-        <Text style={styles.blockedButtonText}>
-          Get Verified Now
-        </Text>
-      </TouchableOpacity>
-
-      <Text style={styles.blockedFooter}>
-        Usually takes 24 hours
-      </Text>
-    </View>
-  );
-}
+//removed blocking vendor functionality so that now we can have vendors still using the app
+//testing w/ tanishka and alvin to see if vendors will prefer this or the other one
 
 function MainApp() {
-
-  const [loading, setLoading] = useState(true);
-  const [vendorVerified, setVendorVerified] = useState(false);
-  const [userType, setUserType] = useState(null);
-  const [userEmail, setUserEmail] = useState(null);
-
-  useEffect(() => {
-    checkVendorStatus();
-  }, []);
-
-  const checkVendorStatus = async () => {
-    try {
-      const type = await AsyncStorage.getItem('userType');
-      const email = await AsyncStorage.getItem('userEmail');
-      
-      setUserType(type);
-      setUserEmail(email);
-
-      //checking if vendor and then verifying
-      if (type !== 'vendor') {
-        setVendorVerified(true); //making sure that regular users still have access
-        setLoading(false);
-        return;
-      }
-
-      //if you're not verified then can't acess
-      if (!email) {
-        setLoading(false);
-        return;
-      }
-
-      const vendorRef = doc(db, 'vendors', email);
-      const vendorDoc = await getDoc(vendorRef);
-      
-      if (!vendorDoc.exists()) {
-        // no vendor profile - needs to apply
-        setVendorVerified(false);
-        setLoading(false);
-        return;
-      }
-
-      const vendorData = vendorDoc.data();
-      const status = vendorData.verificationStatus;
-
-      if (status === 'approved') {
-        setVendorVerified(true);
-      } else {
-        setVendorVerified(false);
-      }
-
-      setLoading(false);
-    } catch (error) {
-      console.error('Error checking vendor status:', error);
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
-    );
-  }
-
-
   return (
     <Tab.Navigator
       screenOptions={{
@@ -723,7 +553,6 @@ function MainApp() {
         {() => (
           <Stack.Navigator>
             <Stack.Screen 
-            //making sure that the rest of the photo verification functions are there now
               name="Food Truck Map" 
               component={MapScreen} 
               options={{ title: "Food Truck Map" }} 
@@ -742,39 +571,23 @@ function MainApp() {
         )}
       </Tab.Screen>
 
-      {/* report tab */}
       <Tab.Screen
         name="Report"
+        component={ReportScreen}
         options={{
           title: 'Report Sighting',
           tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>📝</Text>,
         }}
-      >
-        {() => 
-          userType === 'vendor' && !vendorVerified ? (
-            <VendorBlockedScreen screenName="Report" />
-          ) : (
-            <ReportScreen />
-          )
-        }
-      </Tab.Screen>
+      />
 
-      {/* profile tab - double check this basically need to verify if not verified */}
       <Tab.Screen
         name="Profile"
+        component={ProfileScreen}
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>👤</Text>,
         }}
-      >
-        {() => 
-          userType === 'vendor' && !vendorVerified ? (
-            <VendorBlockedScreen screenName="Profile" />
-          ) : (
-            <ProfileScreen />
-          )
-        }
-      </Tab.Screen>
+      />
     </Tab.Navigator>
   );
 }

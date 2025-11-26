@@ -24,6 +24,7 @@ import {
 } from 'firebase/firestore';
 import { listenToUserSubscriptions, subscribeToTruck, unsubscribeFromTruck, getCurrentPushToken, registerForPushNotificationsAsync } from './notifications';
 import * as Notifications from 'expo-notifications';
+import VerificationReminderBanner from './VerificationReminderBanner';
 
 function NotificationToggle({ truckId, userKey, subscribed }) {
   const [loading, setLoading] = React.useState(false);
@@ -287,6 +288,8 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </View>
+
+      <VerificationReminderBanner />
 
       {userType === 'vendor' && (
         <View style={{ marginBottom: 12 }}>
