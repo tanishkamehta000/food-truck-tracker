@@ -23,14 +23,15 @@ import {
   onSnapshot,
 } from 'firebase/firestore';
 import { listenToUserSubscriptions, subscribeToTruck, unsubscribeFromTruck, getCurrentPushToken, registerForPushNotificationsAsync } from './notifications';
+import * as Notifications from 'expo-notifications';
 
-function NotificationToggle({ truckId, userEmail, subscribed }) {
+function NotificationToggle({ truckId, userKey, subscribed }) {
   const [loading, setLoading] = React.useState(false);
 
   const handleToggle = async () => {
     setLoading(true);
     try {
-      const token = await getCurrentPushToken(userEmail);
+      const token = await getCurrentPushToken(userKey);
       if (!token) {
         alert('Push notifications not enabled on this device. Go to Login and enable notifications.');
         setLoading(false);
@@ -38,9 +39,9 @@ function NotificationToggle({ truckId, userEmail, subscribed }) {
       }
 
       if (subscribed) {
-        await unsubscribeFromTruck(userEmail, token, truckId);
+        await unsubscribeFromTruck(userKey, token, truckId);
       } else {
-        await subscribeToTruck(userEmail, token, truckId);
+        await subscribeToTruck(userKey, token, truckId);
       }
     } catch (err) {
       console.error('Notification toggle error', err);
@@ -69,6 +70,7 @@ export default function ProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
+  const [userId, setUserId] = useState(null);
 
   const [phoneNumber, setPhoneNumber] = useState('');
 
@@ -86,12 +88,15 @@ export default function ProfileScreen({ navigation }) {
     (async () => {
       const type = await AsyncStorage.getItem('userType');
       const email = await AsyncStorage.getItem('userEmail');
+      const id = await AsyncStorage.getItem('userId');
       setUserType(type);
       setUserEmail(email);
+      setUserId(id);
       // load phone number from users/{email}
-      if (email) {
+      const docKey = id || email;
+      if (docKey) {
         try {
-          const userRef = doc(db, 'users', email);
+          const userRef = doc(db, 'users', docKey);
           const snap = await getDoc(userRef);
           if (snap.exists()) {
             const data = snap.data();
@@ -116,6 +121,7 @@ export default function ProfileScreen({ navigation }) {
     try {
       await AsyncStorage.removeItem('userType');
       await AsyncStorage.removeItem('userEmail');
+      await AsyncStorage.removeItem('userId');
     } catch (err) {
       console.warn('AsyncStorage clear error', err);
     }
@@ -128,10 +134,12 @@ export default function ProfileScreen({ navigation }) {
   };
 
   useEffect(() => {
-    if (!userEmail || !userType) return;
+    if (!userType) return;
+
+    const docKey = userId || userEmail;
 
     if (userType === 'user') {
-      const ref = doc(db, 'favorites', userEmail);
+      const ref = doc(db, 'favorites', docKey);
       const unsub = onSnapshot(ref, (snap) => {
         if (snap.exists()) {
           const data = snap.data();
@@ -141,13 +149,13 @@ export default function ProfileScreen({ navigation }) {
         }
       }, (err) => console.error('favorites onSnapshot error', err));
 
-      const unsubSubs = listenToUserSubscriptions(userEmail, (list) => setSubscribedTrucks(list || []));
+      const unsubSubs = listenToUserSubscriptions(docKey, (list) => setSubscribedTrucks(list || []));
 
       return () => { unsub(); if (typeof unsubSubs === 'function') unsubSubs(); };
     }
 
     if (userType === 'vendor') {
-      const ref = doc(db, 'vendors', userEmail);
+      const ref = doc(db, 'vendors', docKey);
       const unsub = onSnapshot(ref, (snap) => {
         if (snap.exists()) {
           const data = snap.data();
@@ -165,14 +173,15 @@ export default function ProfileScreen({ navigation }) {
 
       return () => unsub();
     }
-  }, [userEmail, userType]);
+  }, [userId, userEmail, userType]);
 
   
 
   const unpin = async (truckName) => {
-    if (!userEmail) return;
+    const docKey = userId || userEmail;
+    if (!docKey) return;
     try {
-      const ref = doc(db, 'favorites', userEmail);
+      const ref = doc(db, 'favorites', docKey);
       await updateDoc(ref, { favorites: arrayRemove(truckName) });
     } catch (err) {
       console.error('unpin error', err);
@@ -199,13 +208,14 @@ export default function ProfileScreen({ navigation }) {
   const handleCuisineChange = async (value) => {
     setCuisine(value);
     if (userType === 'vendor') {
-      if (!userEmail) return;
+      const docKey = userId || userEmail;
+      if (!docKey) return;
       try {
-        const ref = doc(db, 'vendors', userEmail);
+        const ref = doc(db, 'vendors', docKey);
         await updateDoc(ref, { cuisine: value });
       } catch (err) {
         try {
-          const ref = doc(db, 'vendors', userEmail);
+          const ref = doc(db, 'vendors', docKey);
           await setDoc(ref, { cuisine: value });
         } catch (e) {
           console.error('save vendor cuisine error', e);
@@ -241,9 +251,10 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const saveMenu = async () => {
-    if (!userEmail) return;
+    const docKey = userId || userEmail;
+    if (!docKey) return;
     try {
-      const ref = doc(db, 'vendors', userEmail);
+      const ref = doc(db, 'vendors', docKey);
       await setDoc(ref, { menu: menuItems });
       Alert.alert('Saved', 'Menu saved successfully.');
     } catch (err) {
@@ -260,7 +271,7 @@ export default function ProfileScreen({ navigation }) {
     );
   }
 
-  if (!userEmail || !userType) {
+  if (!(userId || userEmail) || !userType) {
     return (
       <View style={styles.center}>
         <Text style={styles.message}>Please login to view your profile.</Text>
@@ -298,38 +309,51 @@ export default function ProfileScreen({ navigation }) {
             placeholder="(555) 555-5555"
             value={phoneNumber}
             onChangeText={setPhoneNumber}
-            style={[styles.input, { flex: 1 }]}
+            style={[styles.inputLarge, { flex: 1 }]}
             keyboardType="phone-pad"
             returnKeyType="done"
             blurOnSubmit={true}
             onSubmitEditing={() => Keyboard.dismiss()}
           />
           <TouchableOpacity
-            style={[styles.saveButton, { marginLeft: 8 }]}
+            style={styles.saveButtonInline}
             onPress={async () => {
               Keyboard.dismiss();
-              if (!userEmail) return Alert.alert('Not logged in', 'Please log in to save phone number.');
+              const docKey = userId || userEmail;
+              if (!docKey) return Alert.alert('Not logged in', 'Please log in to save phone number.');
               try {
-                const userRef = doc(db, 'users', userEmail);
+                const userRef = doc(db, 'users', docKey);
                 await setDoc(userRef, { phoneNumber }, { merge: true });
                 Alert.alert('Saved', 'Phone number saved.');
               } catch (err) {
                 console.error('save phone error', err);
-                Alert.alert('Error', 'Could not save phone number.');
+                Alert.alert('Error', 'Could not save phone number.', [
+                  { text: 'OK' },
+                ], { cancelable: true });
+                // show more info in console and also provide a follow-up alert with the message
+                try {
+                  Alert.alert('Details', err && err.message ? String(err.message) : String(err));
+                } catch (e) {
+                  // ignore alert failures
+                }
               }
             }}
           >
             <Text style={styles.saveText}>Save</Text>
           </TouchableOpacity>
+        </View>
+
+        <View style={{ flexDirection: 'row', marginTop: 8 }}>
           <TouchableOpacity
-            style={[styles.mapButton, { marginLeft: 8 }]}
+            style={[styles.mapButton, { marginRight: 8 }]}
             onPress={async () => {
-              if (!userEmail) return Alert.alert('Not logged in', 'Please log in to view push token.');
+              const docKey = userId || userEmail;
+              if (!docKey) return Alert.alert('Not logged in', 'Please log in to view push token.');
               try {
-                let token = await getCurrentPushToken(userEmail);
+                let token = await getCurrentPushToken(docKey);
                 if (!token) {
                   // try registering anew
-                  token = await registerForPushNotificationsAsync(userEmail);
+                  token = await registerForPushNotificationsAsync(docKey);
                 }
                 Alert.alert('Push Token', token || 'No push token available');
               } catch (err) {
@@ -340,14 +364,16 @@ export default function ProfileScreen({ navigation }) {
           >
             <Text style={styles.mapButtonText}>Show Push Token</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
-            style={[styles.mapButton, { marginLeft: 8 }]}
+            style={styles.mapButton}
             onPress={async () => {
-              if (!userEmail) return Alert.alert('Not logged in', 'Please log in to receive test notifications.');
+              const docKey = userId || userEmail;
+              if (!docKey) return Alert.alert('Not logged in', 'Please log in to receive test notifications.');
               try {
-                let token = await getCurrentPushToken(userEmail);
+                let token = await getCurrentPushToken(docKey);
                 if (!token) {
-                  token = await registerForPushNotificationsAsync(userEmail);
+                  token = await registerForPushNotificationsAsync(docKey);
                 }
                 if (!token) {
                   return Alert.alert('No token', 'No push token available to send a test.');
@@ -356,14 +382,22 @@ export default function ProfileScreen({ navigation }) {
                 // Quick token type check: Expo tokens start with "ExponentPushToken["
                 const isExpoToken = typeof token === 'string' && token.startsWith('ExponentPushToken[');
                 if (!isExpoToken) {
-                  return Alert.alert(
-                    'Not an Expo token',
-                    'The token returned is not an Expo push token (it looks like a native FCM/APNs token).\n\n' +
-                    'Options:\n' +
-                    '• Run the local send script (uses Firebase admin) to send to native tokens.\n' +
-                    '• Open the app in Expo Go to get an Expo token (ExponentPushToken[...]) and then use Send Test Push.\n' +
-                    '\nTell me which you prefer and I can help with the next steps.'
-                  );
+                  // Fallback: schedule a local notification so the user still receives a "proper" notification
+                  try {
+                    await Notifications.scheduleNotificationAsync({
+                      content: {
+                        title: 'Food Truck Tracker — Test',
+                        body: 'This is a local test notification (device token is native).',
+                        data: { test: 'true', tokenType: 'native' },
+                      },
+                      trigger: null,
+                    });
+
+                    return Alert.alert('Local notification', 'A local notification was scheduled because the device returned a native push token.');
+                  } catch (e) {
+                    console.error('local notification error', e);
+                    return Alert.alert('Not an Expo token', 'The token returned is not an Expo push token and scheduling a local notification failed.');
+                  }
                 }
 
                 const message = {
@@ -399,7 +433,6 @@ export default function ProfileScreen({ navigation }) {
           >
             <Text style={styles.mapButtonText}>Send Test Push</Text>
           </TouchableOpacity>
-          {/* Debug buttons removed to keep profile UI minimal during testing. */}
         </View>
       </View>
 
@@ -432,7 +465,7 @@ export default function ProfileScreen({ navigation }) {
                         {userType === 'user' && (
                           <NotificationToggle
                             truckId={item}
-                            userEmail={userEmail}
+                            userKey={userId || userEmail}
                             subscribed={subscribedTrucks && subscribedTrucks.includes(item)}
                           />
                         )}
@@ -517,6 +550,10 @@ const styles = StyleSheet.create({
   deleteText: { color: 'white', fontWeight: '600' },
   saveButton: { backgroundColor: '#34C759', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 12 },
   saveText: { color: 'white', fontWeight: '700' },
+  /* larger input for phone number */
+  inputLarge: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, fontSize: 16 },
+  /* Inline save button next to input */
+  saveButtonInline: { backgroundColor: '#34C759', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, marginLeft: 8, justifyContent: 'center', alignItems: 'center' },
   notifyButton: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, marginLeft: 8 },
   notifyOn: { backgroundColor: '#FF9500' },
   notifyOff: { backgroundColor: '#007AFF' },

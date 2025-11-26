@@ -21,6 +21,7 @@ async function main() {
   const truck = args.truck;
   const title = args.title || 'Update';
   const body = args.body || '';
+  const directTokens = args.token ? String(args.token).split(',').map(s => s.trim()).filter(Boolean) : null;
 
   if (!truck) {
     console.error('Missing --truck "Truck Name"');
@@ -68,13 +69,23 @@ async function main() {
 
   const db = admin.firestore();
 
-  const subDoc = await db.collection('subscriptions').doc(truck).get();
-  if (!subDoc.exists) {
-    console.log('No subscriptions found for truck:', truck);
-    return;
-  }
+  let tokens = [];
+  if (directTokens && directTokens.length > 0) {
+    tokens = directTokens.slice();
+    console.log('Using direct tokens provided via --token');
+  } else {
+    if (!truck) {
+      console.error('Missing --truck "Truck Name"');
+      process.exit(1);
+    }
+    const subDoc = await db.collection('subscriptions').doc(truck).get();
+    if (!subDoc.exists) {
+      console.log('No subscriptions found for truck:', truck);
+      return;
+    }
 
-  const tokens = (subDoc.data().tokens || []).slice();
+    tokens = (subDoc.data().tokens || []).slice();
+  }
 
   if (!tokens || tokens.length === 0) {
     console.log('No tokens to send to for', truck);
