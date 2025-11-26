@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  ScrollView,
 } from 'react-native';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from './firebaseConfig';
@@ -117,7 +118,7 @@ export default function VendorPendingScreen({ navigation }) {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={{ flexGrow: 1, paddingBottom: 40, alignItems: 'center' }}>
       <View style={styles.iconContainer}>
         <Text style={styles.icon}>⏳</Text>
       </View>
@@ -163,7 +164,7 @@ export default function VendorPendingScreen({ navigation }) {
         <View style={styles.timelineItem}>
           <View style={[styles.timelineDot, styles.timelineDotComplete]} />
           <View style={styles.timelineContent}>
-            <Text style={styles.timelineTitle}>✅ Photo Submitted</Text>
+            <Text style={styles.timelineTitle}>Photo Submitted</Text>
             <Text style={styles.timelineText}>Your photo has been received</Text>
           </View>
         </View>
@@ -171,7 +172,7 @@ export default function VendorPendingScreen({ navigation }) {
         <View style={styles.timelineItem}>
           <View style={[styles.timelineDot, styles.timelineDotActive]} />
           <View style={styles.timelineContent}>
-            <Text style={styles.timelineTitle}>⏳ Under Review</Text>
+            <Text style={styles.timelineTitle}>Under Review</Text>
             <Text style={styles.timelineText}>Admin is verifying your photo</Text>
           </View>
         </View>
@@ -179,7 +180,7 @@ export default function VendorPendingScreen({ navigation }) {
         <View style={styles.timelineItem}>
           <View style={styles.timelineDot} />
           <View style={styles.timelineContent}>
-            <Text style={styles.timelineTitle}>🎉 Approved</Text>
+            <Text style={styles.timelineTitle}>Approved</Text>
             <Text style={styles.timelineText}>You'll be able to use the app</Text>
           </View>
         </View>
@@ -198,16 +199,14 @@ export default function VendorPendingScreen({ navigation }) {
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    padding: 20,
-    alignItems: 'center',
+  flex: 1,
+  backgroundColor: '#fff',
   },
   loadingContainer: {
     flex: 1,
