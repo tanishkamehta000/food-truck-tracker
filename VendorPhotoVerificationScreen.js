@@ -22,7 +22,6 @@ export default function VendorPhotoVerificationScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
   const [photo, setPhoto] = useState(null);
   const [showExample, setShowExample] = useState(false);
-}
 
 const truckName = route.params?.truckName || 'Your Truck Name';
   const todayDate = new Date().toLocaleDateString('en-US', { 
@@ -280,6 +279,7 @@ const truckName = route.params?.truckName || 'Your Truck Name';
       </TouchableOpacity>
     </ScrollView>
   );
+}
 
   const styles = StyleSheet.create({
   container: {
