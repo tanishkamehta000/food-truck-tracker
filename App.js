@@ -1,20 +1,51 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { ScrollView } from 'react-native';
 import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import MapView, { Marker, Callout } from 'react-native-maps';
-import { collection, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc, getDoc } from 'firebase/firestore';
+import { auth } from './firebaseConfig';
+import { onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
 import LoginScreen from "./LoginScreen";
 import ProfileScreen from './ProfileScreen';
+import DashboardScreen from './DashboardScreen';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, errorInfo: null };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught error:', error, errorInfo);
+    this.setState({ error, errorInfo });
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#111', padding: 12 }}>
+          <Text style={{ color: 'white', fontWeight: '700', marginBottom: 8 }}>App Error</Text>
+          <ScrollView style={{ maxHeight: 400 }}>
+            <Text style={{ color: 'white', fontSize: 12 }}>{String(this.state.error && this.state.error.toString())}</Text>
+            <Text style={{ color: '#ccc', marginTop: 8, fontSize: 11 }}>{this.state.errorInfo ? this.state.errorInfo.componentStack : ''}</Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -31,7 +62,6 @@ function MapScreen({ navigation, route }) {
   const [sightings, setSightings] = useState([]);
   const [mapRegion, setMapRegion] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
-  const [showDebug, setShowDebug] = useState(true);
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -357,12 +387,26 @@ function MapScreen({ navigation, route }) {
     }
   };
 
+  const fetchAdminOnce = async () => {
+    try {
+      const uid = auth?.currentUser?.uid || (await AsyncStorage.getItem('userId'));
+      if (!uid) return Alert.alert('No user', 'Not signed in or no stored userId');
+      const uref = doc(db, 'users', uid);
+      const snap = await getDoc(uref);
+      if (!snap.exists()) return Alert.alert('User doc not found', `users/${uid} does not exist`);
+      const data = snap.data();
+      return Alert.alert('User doc', `uid: ${uid}\nadmin: ${!!data.isAdmin}\n\n${JSON.stringify(data, null, 2)}`);
+    } catch (err) {
+      return Alert.alert('Fetch error', String(err.message || err));
+    }
+  };
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity onPress={() => setShowDebug(!showDebug)} style={{ marginRight: 15 }}>
-            <Text style={{ fontSize: 24, color: '#007AFF' }}>🐛</Text>
+          <TouchableOpacity onPress={fetchAdminOnce} style={{ marginRight: 12 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#007AFF' }}>Check</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={handleRefresh} style={{ marginRight: 15 }}>
             <Text style={{ fontSize: 32, fontWeight: '700', color: '#007AFF' }}>⟳</Text>
@@ -370,7 +414,7 @@ function MapScreen({ navigation, route }) {
         </View>
       ),
     });
-  }, [navigation, showDebug]);
+  }, [navigation]);
 
   if (loading) {
     return (
@@ -461,31 +505,7 @@ function MapScreen({ navigation, route }) {
         })}
       </MapView>
       
-      {/* Debug Panel */}
-      {showDebug && (
-        <View style={styles.debugPanel}>
-          <Text style={styles.debugText}>DEBUG INFO - VERIFICATION STATUS</Text>
-          <Text style={styles.debugText}>Your Location: {location ? `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}` : 'Unknown'}</Text>
-          <Text style={styles.debugText}>Total Sightings: {sightings.length}</Text>
-          <Text style={styles.debugText}>Valid Markers: {validMarkers.length}</Text>
-          <Text style={styles.debugText}>✅ Verified: {validMarkers.filter(m => m.status === 'verified').length}</Text>
-          <Text style={styles.debugText}>⏳ Pending: {validMarkers.filter(m => m.status === 'pending').length}</Text>
-          {validMarkers.map((marker, index) => (
-            <Text key={marker.id} style={[
-              styles.debugText,
-              marker.status === 'verified' ? { color: 'lightgreen', fontWeight: 'bold' } : { color: 'white' }
-            ]}>
-              {index + 1}. {marker.foodTruckName}: {marker.location.latitude.toFixed(6)}, {marker.location.longitude.toFixed(6)} - {marker.status.toUpperCase()}
-            </Text>
-          ))}
-          <TouchableOpacity onPress={centerOnMarkers} style={styles.debugButton}>
-            <Text style={styles.debugButtonText}>🎯 Center on Markers</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleRefresh} style={[styles.debugButton, { backgroundColor: '#FF9500', marginTop: 5 }]}>
-            <Text style={styles.debugButtonText}>🔄 Force Refresh</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      {/* Debug Panel removed */}
       
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Map Legend</Text>
@@ -522,7 +542,7 @@ function MapScreen({ navigation, route }) {
   );
 }
 
-function MainApp() {
+function MainApp({ isAdmin }) {
   return (
     <Tab.Navigator
       screenOptions={{
@@ -562,6 +582,16 @@ function MainApp() {
           tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>👤</Text>,
         }}
       />
+      {isAdmin && (
+        <Tab.Screen
+          name="Dashboard"
+          component={DashboardScreen}
+          options={{
+            title: 'Dashboard',
+            tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>📊</Text>,
+          }}
+        />
+      )}
     </Tab.Navigator>
   );
 }
@@ -569,14 +599,94 @@ function MainApp() {
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [hasUserType, setHasUserType] = useState(false);
+  const [userId, setUserId] = useState(null);
+  const [userDoc, setUserDoc] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+
 
   useEffect(() => {
     const checkUserType = async () => {
-      const userType = await AsyncStorage.getItem("userType");
-      setHasUserType(!!userType);
-      setLoading(false);
+      try {
+        const userType = await AsyncStorage.getItem("userType");
+        setHasUserType(!!userType);
+        // also load stored userId if present
+        const storedId = await AsyncStorage.getItem('userId');
+        if (storedId) setUserId(storedId);
+        // If there's no authenticated user but we have a stored userId, try to read the users/{uid} doc as a fallback.
+        // This will only succeed if your Firestore rules allow reads without auth or allow reads for that uid.
+        try {
+          if (!auth.currentUser && storedId) {
+            const uref = doc(db, 'users', storedId);
+            const snap = await getDoc(uref);
+            if (snap.exists()) {
+              const data = snap.data();
+              setUserDoc(data);
+              const adminFlag = !!data.isAdmin;
+              setIsAdmin(adminFlag);
+            }
+          }
+        } catch (readErr) {
+          // fallback read failed; silently ignore to avoid noisy logs
+        }
+      } catch (err) {
+        // AsyncStorage error; ignore for now
+      } finally {
+        setLoading(false);
+      }
     };
     checkUserType();
+
+    // listen for auth state changes to refresh isAdmin
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      // Run async work inside an IIFE so we don't pass an async fn directly to the listener
+      (async () => {
+        try {
+          const uid = user?.uid;
+          if (!uid) {
+            setUserId(null);
+            setIsAdmin(false);
+            setUserDoc(null);
+            return;
+          }
+
+          // At this point we have a uid
+          setUserId(uid);
+          const uref = doc(db, 'users', uid);
+          const snap = await getDoc(uref);
+          const adminFlag = snap.exists() && !!snap.data().isAdmin;
+          setIsAdmin(adminFlag);
+          setUserDoc(snap.exists() ? snap.data() : null);
+        } catch (err) {
+          setIsAdmin(false);
+          setUserDoc(null);
+        }
+      })();
+    });
+
+    // Also check current user immediately in case auth state is already established
+    try {
+      const current = auth.currentUser;
+      if (current?.uid) {
+        (async () => {
+          try {
+            const curUid = current.uid;
+            const uref = doc(db, 'users', curUid);
+            const snap = await getDoc(uref);
+            const adminFlag = snap.exists() && !!snap.data().isAdmin;
+            setIsAdmin(adminFlag);
+            setUserId(curUid);
+            setUserDoc(snap.exists() ? snap.data() : null);
+          } catch (err) {
+            setUserDoc(null);
+          }
+        })();
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return () => unsubAuth();
   }, []);
 
   if (loading) {
@@ -588,12 +698,22 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="MainApp" component={MainApp} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ErrorBoundary>
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="MainApp">
+            {(props) => <MainApp {...props} isAdmin={isAdmin} />}
+          </Stack.Screen>
+        </Stack.Navigator>
+        {/* DEBUG badge showing current auth uid, isAdmin flag, and fetched users/{uid} doc */}
+        <View style={{ position: 'absolute', top: 36, right: 12, backgroundColor: 'rgba(0,0,0,0.82)', padding: 8, borderRadius: 8, zIndex: 999, maxWidth: 260 }}>
+          <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>Auth UID:</Text>
+          <Text style={{ color: 'white', fontSize: 11, marginBottom: 6 }}>{userId || 'none'}</Text>
+          <Text style={{ color: isAdmin ? '#4CD964' : '#FF3B30', fontWeight: '700', fontSize: 13 }}>{`admin: ${isAdmin}`}</Text>
+        </View>
+      </NavigationContainer>
+    </ErrorBoundary>
   );
 }
 
