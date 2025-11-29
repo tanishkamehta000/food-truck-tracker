@@ -58,19 +58,19 @@ export default function LoginScreen({ navigation }) {
       } else {
         userCredential = await signInWithEmailAndPassword(auth, email, password);
 
-        if (!userCredential.user.emailVerified) {
-          try {
-            await sendEmailVerification(userCredential.user);
-            Alert.alert('Email not verified', 'A verification email was sent. Please verify your email and then log in.');
-          } catch (err) {
-            console.error('sendEmailVerification on login error', err);
-            Alert.alert('Email not verified', 'Please verify your email before logging in.');
-          }
+        // if (!userCredential.user.emailVerified) {
+        //   try {
+        //     await sendEmailVerification(userCredential.user);
+        //     Alert.alert('Email not verified', 'A verification email was sent. Please verify your email and then log in.');
+        //   } catch (err) {
+        //     console.error('sendEmailVerification on login error', err);
+        //     Alert.alert('Email not verified', 'Please verify your email before logging in.');
+        //   }
 
-          try { await signOut(auth); } catch (e) { /* ignore */ }
-          setLoading(false);
-          return;
-        }
+        //   try { await signOut(auth); } catch (e) { /* ignore */ }
+        //   setLoading(false);
+        //   return;
+        // }
 
         await AsyncStorage.setItem('userType', role);
         await AsyncStorage.setItem('userEmail', email);

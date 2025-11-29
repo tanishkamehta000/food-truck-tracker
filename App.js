@@ -314,13 +314,13 @@ function MapScreen({ navigation, route }) {
       setLastUpdate(Date.now());
       
       console.log('Firebase update - Total sightings:', sortedSightings.length);
-      console.log('✅ Verified:', sortedSightings.filter(s => s.status === 'verified').length);
-      console.log('⏳ Pending:', sortedSightings.filter(s => s.status === 'pending').length);
+      console.log('Verified:', sortedSightings.filter(s => s.status === 'verified').length);
+      console.log('Pending:', sortedSightings.filter(s => s.status === 'pending').length);
       
       // debugging
       sortedSightings.forEach(sighting => {
         const hasLocation = sighting.location && sighting.location.latitude && sighting.location.longitude;
-        console.log(`📍 ${sighting.foodTruckName}: ${sighting.status} | Location: ${hasLocation ? '✅' : '❌'} | Coords: ${sighting.location?.latitude}, ${sighting.location?.longitude}`);
+        console.log(`${sighting.foodTruckName}: ${sighting.status} | Location: ${hasLocation ? 'true' : 'false'} | Coords: ${sighting.location?.latitude}, ${sighting.location?.longitude}`);
       });
     });
 
@@ -357,7 +357,7 @@ function MapScreen({ navigation, route }) {
       setMapRegion(userRegion);
       setLoading(false);
       
-      console.log('📍 Your location:', currentLocation.coords.latitude, currentLocation.coords.longitude);
+      console.log('Your location:', currentLocation.coords.latitude, currentLocation.coords.longitude);
     } catch (error) {
       setErrorMsg('Error getting location');
       setLoading(false);
@@ -389,7 +389,7 @@ function MapScreen({ navigation, route }) {
                             typeof sighting.location.longitude === 'number';
       
       if (!hasValidCoords) {
-        console.log('❌ Skipping invalid marker:', sighting.foodTruckName, 'Location:', sighting.location);
+        console.log('Skipping invalid marker:', sighting.foodTruckName, 'Location:', sighting.location);
       }
       
       return hasValidCoords;
@@ -672,11 +672,11 @@ function MapScreen({ navigation, route }) {
                         {/* Left column: time + distance */}
                         <View style={styles.statCol}>
                           <View style={styles.statItem}>
-                            <Text style={styles.statIcon}>🕒</Text>
+                            <Text style={styles.statIcon}></Text>
                             <Text style={styles.statText}>{mins != null ? `${mins} min` : '—'}</Text>
                           </View>
                           <View style={styles.statItem}>
-                            <Text style={styles.statIcon}>📍</Text>
+                            <Text style={styles.statIcon}></Text>
                             <Text style={styles.statText}>{miles != null ? `${miles} mi` : '—'}</Text>
                           </View>
                         </View>
@@ -684,7 +684,7 @@ function MapScreen({ navigation, route }) {
                         {/* Right column: crowd + confirmed time */}
                         <View style={styles.statCol}>
                           <View style={styles.statItem}>
-                            <Text style={styles.statIcon}>👥</Text>
+                            <Text style={styles.statIcon}></Text>
                             <Text style={[styles.statText, { color: getCrowdTextColor(selected.crowdLevel), fontWeight: '600' }]}>
                               {selected.crowdLevel ? `${selected.crowdLevel} crowd` : '—'}
                             </Text>
@@ -735,7 +735,7 @@ function MapScreen({ navigation, route }) {
                     onPress={() => Alert.alert('Thanks!', 'Your confirmation has been recorded (prototype).')}
                     style={{ paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#f5f5f5', borderRadius: 10, marginRight: 10 }}
                   >
-                    <Text>✅ Confirm</Text>
+                    <Text>Confirm</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -745,7 +745,7 @@ function MapScreen({ navigation, route }) {
                     }}
                     style={{ paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#f5f5f5', borderRadius: 10 }}
                   >
-                    <Text>🚩 Report</Text>
+                    <Text> Report</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -776,8 +776,8 @@ function MapScreen({ navigation, route }) {
           <Text style={styles.debugText}>Your Location: {location ? `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}` : 'Unknown'}</Text>
           <Text style={styles.debugText}>Total Sightings: {sightings.length}</Text>
           <Text style={styles.debugText}>Valid Markers: {validMarkers.length}</Text>
-          <Text style={styles.debugText}>✅ Verified: {validMarkers.filter(m => m.status === 'verified').length}</Text>
-          <Text style={styles.debugText}>⏳ Pending: {validMarkers.filter(m => m.status === 'pending').length}</Text>
+          <Text style={styles.debugText}> Verified: {validMarkers.filter(m => m.status === 'verified').length}</Text>
+          <Text style={styles.debugText}> Pending: {validMarkers.filter(m => m.status === 'pending').length}</Text>
           {validMarkers.map((marker, index) => (
             <Text key={marker.id} style={[
               styles.debugText,
