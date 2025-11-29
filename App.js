@@ -10,6 +10,8 @@ import {
   Modal,
   Linking,
   Platform,
+  TextInput, 
+  KeyboardAvoidingView, 
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -29,6 +31,7 @@ import {
   arrayRemove,
   setDoc,
   getDoc,
+  addDoc,  
 } from 'firebase/firestore';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -103,6 +106,60 @@ function MapScreen({ navigation, route }) {
   const [popular, setPopular] = useState([]);     // array of strings, aggregated
   const [confirmCount, setConfirmCount] = useState(0);
   const [lastConfirmedMin, setLastConfirmedMin] = useState(null);
+  const [reportedIssues, setReportedIssues] = useState([]);    
+  const [issueModalVisible, setIssueModalVisible] = useState(false);
+  const [issueText, setIssueText] = useState('');
+
+  const loadIssuesForTruck = async (truckName) => {
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, 'reportedIssues'),
+          where('truckName', '==', truckName)
+        )
+      );
+      const issues = snap.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      }));
+      setReportedIssues(issues);
+    } catch (err) {
+      console.error('loadIssuesForTruck error', err);
+      setReportedIssues([]);
+    }
+  };
+
+  const submitIssue = async () => {
+    const text = issueText.trim();
+    if (!selected || !text) {
+      Alert.alert('Missing info', 'Please enter an issue description.');
+      return;
+    }
+  
+    try {
+      await addDoc(collection(db, 'reportedIssues'), {
+        truckName: selected.foodTruckName,
+        sightingId: selected.id,
+        reporterId: userId || null,
+        reporterEmail: userEmail || null,
+        description: text,
+        createdAt: new Date().toISOString(),
+      });
+  
+      setIssueText('');
+      setIssueModalVisible(false);
+  
+      // reload issues so the new one appears in the list
+      await loadIssuesForTruck(selected.foodTruckName);
+      Alert.alert('Thank you', 'Your issue has been reported.');
+    } catch (err) {
+      console.error('submitIssue error', err);
+      Alert.alert('Error', 'Could not submit issue.');
+    }
+  };
+
+
+
 
   useEffect(() => {
     requestLocationPermission();
@@ -222,6 +279,8 @@ function MapScreen({ navigation, route }) {
   async function openTruckSheet(sighting) {
     try {
       setSelected(sighting);
+
+      await loadIssuesForTruck(sighting.foodTruckName);
 
       // fetch all sightings of the same truck (e.g., last 24h is typical — you can add a date filter later)
       const snap = await getDocs(
@@ -569,7 +628,7 @@ function MapScreen({ navigation, route }) {
       <MapView
         ref={mapRef}
         style={styles.map}
-        region={mapRegion} 
+        region={mapRegion}
         showsUserLocation={true}
         showsMyLocationButton={true}
         onMapReady={() => console.log('Map is ready')}
@@ -586,17 +645,17 @@ function MapScreen({ navigation, route }) {
             pinColor="purple"
           />
         )}
-        
-        {/* Food truck sightings - Only valid markers */}
+  
+        {/* Food truck sightings */}
         {validMarkers.map((sighting) => {
           const markerColor = getMarkerColor(sighting.crowdLevel);
-          console.log(`📍 Rendering marker: ${sighting.foodTruckName} with color: ${markerColor} (status: ${sighting.status})`);
-
           const isFavorited = favorites && favorites.includes(sighting.foodTruckName);
-
+  
           return (
             <Marker
-              ref={(ref) => { if (ref) markerRefs.current[sighting.id] = ref; }}
+              ref={(ref) => {
+                if (ref) markerRefs.current[sighting.id] = ref;
+              }}
               key={sighting.id}
               coordinate={{
                 latitude: sighting.location.latitude,
@@ -608,10 +667,11 @@ function MapScreen({ navigation, route }) {
               onPress={() => openTruckSheet(sighting)}
               onCalloutPress={() => toggleFavorite(sighting)}
             >
-              <Callout tooltip={false} onPress={() => { /* noop */ }}>
+              <Callout tooltip={false}>
                 <View style={styles.calloutContainer}>
                   <Text style={styles.calloutTitle}>{sighting.foodTruckName}</Text>
                   <Text style={styles.calloutDesc}>{getMarkerDescription(sighting)}</Text>
+  
                   {userType === 'user' ? (
                     <TouchableOpacity
                       style={[styles.pinButton, isFavorited ? styles.unpinStyle : styles.pinStyle]}
@@ -628,160 +688,332 @@ function MapScreen({ navigation, route }) {
           );
         })}
       </MapView>
-
+  
       {/* Truck detail bottom-sheet */}
       <Modal
         animationType="slide"
         transparent
         visible={sheetVisible}
-        onRequestClose={() => setSheetVisible(false)}
+        onRequestClose={() => {
+          setSheetVisible(false);
+          setIssueModalVisible(false); // reset when closing sheet
+        }}
       >
-        <View style={styles.sheetBackdrop}>
-          {/* tap backdrop to close */}
-          <TouchableOpacity style={{ flex: 1 }} onPress={() => setSheetVisible(false)} />
-          <View style={styles.sheet}>
-            {selected && (
-              <>
-                {/* Header */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                  {/* Placeholder image */}
-                  <View style={{
-                    width: 52, height: 52, borderRadius: 10, backgroundColor: '#eee', marginRight: 12,
-                    alignItems: 'center', justifyContent: 'center'
-                  }}>
-                    <Text>📷</Text>
-                  </View>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={80} // tweak if it’s still a bit low/high
+        >
+          <View style={styles.sheetBackdrop}>
+            {/* tap backdrop to close */}
+            <TouchableOpacity
+              style={{ flex: 1 }}
+              onPress={() => {
+                setSheetVisible(false);
+                setIssueModalVisible(false);
+              }}
+            />
 
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 18, fontWeight: '700' }}>{selected.foodTruckName}</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                      <View style={{ paddingHorizontal: 8, paddingVertical: 4, backgroundColor: '#f1f5f9', borderRadius: 6, marginRight: 8 }}>
-                        <Text style={{ fontSize: 12 }}>{selected.cuisineType || '—'}</Text>
+            <View style={styles.sheet}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {/* === DETAILS VIEW === */}
+                {selected && !issueModalVisible && (
+                  <>
+                    {/* Header */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                      <View
+                        style={{
+                          width: 52,
+                          height: 52,
+                          borderRadius: 10,
+                          backgroundColor: '#eee',
+                          marginRight: 12,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Text>📷</Text>
                       </View>
-                      <Text>⭐ 4.8</Text>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700' }}>{selected.foodTruckName}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                          <View
+                            style={{
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              backgroundColor: '#f1f5f9',
+                              borderRadius: 6,
+                              marginRight: 8,
+                            }}
+                          >
+                            <Text style={{ fontSize: 12 }}>{selected.cuisineType || '—'}</Text>
+                          </View>
+                          <Text>⭐ 4.8</Text>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={() => {
+                          setSheetVisible(false);
+                          setIssueModalVisible(false);
+                        }}
+                      >
+                        <Text style={{ fontSize: 18 }}>✕</Text>
+                      </TouchableOpacity>
                     </View>
-                  </View>
 
-                  <TouchableOpacity onPress={() => setSheetVisible(false)}>
-                    <Text style={{ fontSize: 18 }}>✕</Text>
-                  </TouchableOpacity>
-                </View>
+                    {/* Stats */}
+                    {(() => {
+                      const hasLoc = !!location && !!selected?.location;
+                      const distM = hasLoc
+                        ? distanceMeters(
+                            location.latitude,
+                            location.longitude,
+                            selected.location.latitude,
+                            selected.location.longitude
+                          )
+                        : null;
 
-                {/* Stats row (compact 2x2 like the mock) */}
-                {(() => {
-                  const hasLoc = !!location && !!selected?.location;
-                  const distM = hasLoc
-                    ? distanceMeters(
-                        location.latitude, location.longitude,
-                        selected.location.latitude, selected.location.longitude
-                      )
-                    : null;
-                  const mins = distM != null ? Math.max(1, Math.round(distM / 80)) : null; // ~80 m/min walk
-                  const miles = distM != null ? (distM / 1609.34).toFixed(1) : null;
+                      const mins = distM != null ? Math.max(1, Math.round(distM / 80)) : null;
+                      const miles = distM != null ? (distM / 1609.34).toFixed(1) : null;
 
-                  return (
-                    <>
-                      <View style={styles.statGrid}>
-                        {/* Left column: time + distance */}
-                        <View style={styles.statCol}>
-                          <View style={styles.statItem}>
-                            <Text style={styles.statIcon}></Text>
-                            <Text style={styles.statText}>{mins != null ? `${mins} min` : '—'}</Text>
+                      return (
+                        <>
+                          <View style={styles.statGrid}>
+                            <View style={styles.statCol}>
+                              <View style={styles.statItem}>
+                                <Text style={styles.statIcon} />
+                                <Text style={styles.statText}>{mins != null ? `${mins} min` : '—'}</Text>
+                              </View>
+                              <View style={styles.statItem}>
+                                <Text style={styles.statIcon} />
+                                <Text style={styles.statText}>{miles != null ? `${miles} mi` : '—'}</Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.statCol}>
+                              <View style={styles.statItem}>
+                                <Text style={styles.statIcon} />
+                                <Text
+                                  style={[
+                                    styles.statText,
+                                    { color: getCrowdTextColor(selected.crowdLevel), fontWeight: '600' },
+                                  ]}
+                                >
+                                  {selected.crowdLevel ? `${selected.crowdLevel} crowd` : '—'}
+                                </Text>
+                              </View>
+                              <View style={styles.statItem}>
+                                <Text style={styles.statIcon}>✔︎</Text>
+                                <Text style={styles.statText}>
+                                  {lastConfirmedMin != null
+                                    ? `Confirmed ${lastConfirmedMin} min ago`
+                                    : 'Confirmed recently'}
+                                </Text>
+                              </View>
+                            </View>
                           </View>
-                          <View style={styles.statItem}>
-                            <Text style={styles.statIcon}></Text>
-                            <Text style={styles.statText}>{miles != null ? `${miles} mi` : '—'}</Text>
-                          </View>
-                        </View>
 
-                        {/* Right column: crowd + confirmed time */}
-                        <View style={styles.statCol}>
-                          <View style={styles.statItem}>
-                            <Text style={styles.statIcon}></Text>
-                            <Text style={[styles.statText, { color: getCrowdTextColor(selected.crowdLevel), fontWeight: '600' }]}>
-                              {selected.crowdLevel ? `${selected.crowdLevel} crowd` : '—'}
+                          <View style={styles.statDivider} />
+                        </>
+                      );
+                    })()}
+
+                    {/* Description */}
+                    <View style={{ marginTop: 6 }}>
+                      <Text style={{ fontSize: 14, color: '#444' }}>
+                        {selected.additionalNotes?.trim() || 'No description yet.'}
+                      </Text>
+                    </View>
+
+                    {/* Popular items */}
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={{ fontWeight: '700', marginBottom: 6 }}>Popular Items</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                        {(popular.length ? popular : ['Carne Asada', 'Fish Tacos', 'Carnitas', 'Elote']).map(
+                          (item, i) => (
+                            <View
+                              key={i}
+                              style={{
+                                paddingVertical: 6,
+                                paddingHorizontal: 10,
+                                backgroundColor: '#f0f0f0',
+                                borderRadius: 16,
+                                marginRight: 6,
+                                marginBottom: 6,
+                              }}
+                            >
+                              <Text>{item}</Text>
+                            </View>
+                          )
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Confirmation count */}
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={{ fontSize: 12, color: '#666' }}>
+                        Location confirmed by {Math.max(confirmCount, 1)} user
+                        {Math.max(confirmCount, 1) === 1 ? '' : 's'}
+                      </Text>
+                    </View>
+
+                    {/* Issues summary */}
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={{ fontSize: 12, color: '#666', fontWeight: '600' }}>
+                        {reportedIssues.length} issue{reportedIssues.length === 1 ? '' : 's'} reported
+                      </Text>
+
+                      {reportedIssues.length > 0 && (
+                        <View style={{ marginTop: 6 }}>
+                          {reportedIssues.slice(0, 3).map((issue) => (
+                            <View key={issue.id} style={{ marginBottom: 4 }}>
+                              <Text style={{ fontSize: 12, color: '#444' }}>• {issue.description}</Text>
+                              {issue.createdAt && (
+                                <Text style={{ fontSize: 10, color: '#999' }}>
+                                  {new Date(issue.createdAt).toLocaleString()}
+                                </Text>
+                              )}
+                            </View>
+                          ))}
+                          {reportedIssues.length > 3 && (
+                            <Text style={{ fontSize: 11, color: '#007AFF', marginTop: 4 }}>
+                              + {reportedIssues.length - 3} more…
                             </Text>
-                          </View>
-                          <View style={styles.statItem}>
-                            <Text style={styles.statIcon}>✔︎</Text>
-                            <Text style={styles.statText}>
-                              {lastConfirmedMin != null ? `Confirmed ${lastConfirmedMin} min ago` : 'Confirmed recently'}
-                            </Text>
-                          </View>
+                          )}
                         </View>
+                      )}
+                    </View>
+
+                    {/* Actions */}
+                    <View style={{ flexDirection: 'row', marginTop: 12 }}>
+                      <TouchableOpacity
+                        onPress={() =>
+                          Alert.alert('Thanks!', 'Your confirmation has been recorded (prototype).')
+                        }
+                        style={{
+                          paddingVertical: 10,
+                          paddingHorizontal: 14,
+                          backgroundColor: '#f5f5f5',
+                          borderRadius: 10,
+                          marginRight: 10,
+                        }}
+                      >
+                        <Text>Confirm</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => setIssueModalVisible(true)}
+                        style={{
+                          paddingVertical: 10,
+                          paddingHorizontal: 14,
+                          backgroundColor: '#f5f5f5',
+                          borderRadius: 10,
+                        }}
+                      >
+                        <Text>Report issue</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Navigate */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        const { latitude, longitude } = selected.location;
+                        const url = Platform.select({
+                          ios: `http://maps.apple.com/?daddr=${latitude},${longitude}`,
+                          android: `geo:0,0?q=${latitude},${longitude}(${encodeURIComponent(
+                            selected.foodTruckName
+                          )})`,
+                        });
+                        Linking.openURL(url);
+                      }}
+                      style={{
+                        marginTop: 16,
+                        backgroundColor: '#0B0B14',
+                        padding: 14,
+                        borderRadius: 12,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ color: 'white', fontWeight: '700' }}>
+                        ▸ Navigate to {selected.foodTruckName}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                {/* === ISSUE FORM VIEW === */}
+                {selected && issueModalVisible && (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700' }}>
+                          Report an issue for {selected.foodTruckName}
+                        </Text>
                       </View>
 
-                      <View style={styles.statDivider} />
-                    </>
-                  );
-                })()}
+                      <TouchableOpacity onPress={() => setIssueModalVisible(false)}>
+                        <Text style={{ fontSize: 18 }}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
 
-                {/* Description */}
-                <View style={{ marginTop: 6 }}>
-                  <Text style={{ fontSize: 14, color: '#444' }}>
-                    {selected.additionalNotes?.trim() || 'No description yet.'}
-                  </Text>
-                </View>
+                    <Text style={{ fontSize: 13, color: '#555', marginBottom: 8 }}>
+                      Example: “Truck not here”, “Wrong hours”, “Pin in wrong spot”, etc.
+                    </Text>
 
-                {/* Popular items */}
-                <View style={{ marginTop: 12 }}>
-                  <Text style={{ fontWeight: '700', marginBottom: 6 }}>Popular Items</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                    {(popular.length ? popular : ['Carne Asada','Fish Tacos','Carnitas','Elote']).map((item, i) => (
-                      <View key={i} style={{ paddingVertical: 6, paddingHorizontal: 10, backgroundColor: '#f0f0f0', borderRadius: 16, marginRight: 6, marginBottom: 6 }}>
-                        <Text>{item}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
+                    <TextInput
+                      style={{
+                        borderWidth: 1,
+                        borderColor: '#ddd',
+                        borderRadius: 8,
+                        padding: 10,
+                        minHeight: 80,
+                        textAlignVertical: 'top',
+                        fontSize: 14,
+                      }}
+                      multiline
+                      placeholder="Describe the issue..."
+                      value={issueText}
+                      onChangeText={setIssueText}
+                    />
 
-                {/* Confirmation count */}
-                <View style={{ marginTop: 12 }}>
-                  <Text style={{ fontSize: 12, color: '#666' }}>
-                    Location confirmed by {Math.max(confirmCount, 1)} user{Math.max(confirmCount, 1) === 1 ? '' : 's'}
-                  </Text>
-                </View>
+                    <View style={{ flexDirection: 'row', marginTop: 12, justifyContent: 'flex-end' }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setIssueModalVisible(false);
+                          setIssueText('');
+                        }}
+                        style={{ paddingVertical: 10, paddingHorizontal: 14, marginRight: 8 }}
+                      >
+                        <Text style={{ color: '#555' }}>Cancel</Text>
+                      </TouchableOpacity>
 
-                {/* Actions */}
-                <View style={{ flexDirection: 'row', marginTop: 12 }}>
-                  <TouchableOpacity
-                    onPress={() => Alert.alert('Thanks!', 'Your confirmation has been recorded (prototype).')}
-                    style={{ paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#f5f5f5', borderRadius: 10, marginRight: 10 }}
-                  >
-                    <Text>Confirm</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSheetVisible(false);
-                      navigation.navigate('Report');
-                    }}
-                    style={{ paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#f5f5f5', borderRadius: 10 }}
-                  >
-                    <Text> Report</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Navigate CTA */}
-                <TouchableOpacity
-                  onPress={() => {
-                    const { latitude, longitude } = selected.location;
-                    const url = Platform.select({
-                      ios: `http://maps.apple.com/?daddr=${latitude},${longitude}`,
-                      android: `geo:0,0?q=${latitude},${longitude}(${encodeURIComponent(selected.foodTruckName)})`,
-                    });
-                    Linking.openURL(url);
-                  }}
-                  style={{ marginTop: 16, backgroundColor: '#0B0B14', padding: 14, borderRadius: 12, alignItems: 'center' }}
-                >
-                  <Text style={{ color: 'white', fontWeight: '700' }}>▸ Navigate to {selected.foodTruckName}</Text>
-                </TouchableOpacity>
-              </>
-            )}
+                      <TouchableOpacity
+                        onPress={submitIssue}
+                        style={{
+                          paddingVertical: 10,
+                          paddingHorizontal: 18,
+                          backgroundColor: '#007AFF',
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Text style={{ color: 'white', fontWeight: '600' }}>Submit</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </ScrollView>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
+  
+      {/* Legend */}
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Map Legend</Text>
         <View style={styles.legendItem}>
@@ -797,17 +1029,18 @@ function MapScreen({ navigation, route }) {
           <Text style={styles.legendText}>Busy</Text>
         </View>
       </View>
-
+  
+      {/* Stats Bar */}
       <View style={styles.statsBar}>
         <Text style={styles.statsText}>
-          {validMarkers.filter(s => s.status === 'verified').length} Verified • 
-          {validMarkers.filter(s => s.status === 'pending').length} Pending •
+          {validMarkers.filter((s) => s.status === 'verified').length} Verified •
+          {validMarkers.filter((s) => s.status === 'pending').length} Pending •
           Total: {validMarkers.length}
         </Text>
       </View>
     </View>
   );
-}
+}  
 
 function MainApp({ isAdmin }) {
   return (
@@ -862,7 +1095,9 @@ function MainApp({ isAdmin }) {
           component={DashboardScreen}
           options={{
             title: 'Dashboard',
-            tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>📊</Text>,
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="stats-chart-outline" size={size} color={color} />
+            ),
           }}
         />
       )}
@@ -1096,7 +1331,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    maxHeight: '85%',
+    maxHeight: '90%',
   },
   statGrid: {
     flexDirection: 'row',
