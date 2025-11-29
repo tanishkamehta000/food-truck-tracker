@@ -1,3 +1,4 @@
+import DiscoverScreen from './DiscoverScreen';
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   ScrollView,
@@ -1069,12 +1070,12 @@ function MainApp({ isAdmin }) {
       </Tab.Screen>
 
       <Tab.Screen
-        name="Report"
-        component={ReportScreen}
+        name="Discover"
+        component={DiscoverScreen}
         options={{
-          title: 'Report Sighting',
+          title: 'Discover',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="create-outline" size={size} color={color} />
+            <Ionicons name="star-outline" size={size} color={color} />
           ),
         }}
       />
@@ -1089,6 +1090,19 @@ function MainApp({ isAdmin }) {
           ),
         }}
       />
+
+      <Tab.Screen
+        name="Report"
+        component={ReportScreen}
+        options={{
+          title: 'Report Sighting',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="create-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
+      
       {isAdmin && (
         <Tab.Screen
           name="Dashboard"
