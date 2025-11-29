@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
+  ScrollView,
   StyleSheet,
   View,
   Text,
-  TextInput,
   Alert,
   ActivityIndicator,
   TouchableOpacity,
@@ -16,71 +16,65 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import MapView, { Marker, Callout } from 'react-native-maps';
-import { collection, where, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc } from 'firebase/firestore';
+import {
+  collection,
+  where,
+  onSnapshot,
+  query,
+  getDocs,
+  deleteDoc,
+  doc,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
+  setDoc,
+  getDoc,
+} from 'firebase/firestore';
+import { auth } from './firebaseConfig';
+import { onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
-import LoginScreen from "./LoginScreen";
+import LoginScreen from './LoginScreen';
 import ProfileScreen from './ProfileScreen';
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import DashboardScreen from './DashboardScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
-async function deleteByTruckName(name) {
-  const trimmed = (name || '').trim();
-  if (!trimmed) {
-    Alert.alert('Validation', 'Enter a truck name.');
-    return;
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, errorInfo: null };
   }
 
-  try {
-    // First try exact match via Firestore query (fast path)
-    let docs = [];
-    {
-      const q = query(collection(db, 'sightings'), where('foodTruckName', '==', trimmed));
-      const snap = await getDocs(q);
-      docs = snap.docs;
-    }
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught error:', error, errorInfo);
+    this.setState({ error, errorInfo });
+  }
 
-    // Fallback: case-insensitive match (client-side filter) if nothing found
-    if (docs.length === 0) {
-      const all = await getDocs(collection(db, 'sightings'));
-      docs = all.docs.filter(d =>
-        String((d.data().foodTruckName || '')).toLowerCase() === trimmed.toLowerCase()
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#111', padding: 12 }}>
+          <Text style={{ color: 'white', fontWeight: '700', marginBottom: 8 }}>App Error</Text>
+          <ScrollView style={{ maxHeight: 400 }}>
+            <Text style={{ color: 'white', fontSize: 12 }}>
+              {String(this.state.error && this.state.error.toString())}
+            </Text>
+            <Text style={{ color: '#ccc', marginTop: 8, fontSize: 11 }}>
+              {this.state.errorInfo ? this.state.errorInfo.componentStack : ''}
+            </Text>
+          </ScrollView>
+        </View>
       );
     }
-
-    if (docs.length === 0) {
-      Alert.alert('No results', `No sightings found for "${trimmed}".`);
-      return;
-    }
-
-    await Promise.all(docs.map(d => deleteDoc(d.ref)));
-    Alert.alert('Deleted', `Removed ${docs.length} sighting(s) for "${trimmed}".`);
-    console.log(`Deleted ${docs.length} docs for ${trimmed}`);
-  } catch (err) {
-    console.error('Error deleting by truck name:', err);
-    Alert.alert('Error', 'Could not delete truck sightings.');
+    return this.props.children;
   }
 }
 
-// delete everything
-async function deleteAllSightings() {
-  try {
-    const snap = await getDocs(collection(db, 'sightings'));
-    if (snap.empty) {
-      Alert.alert('No data', 'There are no sightings to delete.');
-      return;
-    }
-    await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
-    Alert.alert('Deleted', `Removed ${snap.docs.length} total sightings.`);
-    console.log(`Deleted all ${snap.docs.length} docs`);
-  } catch (err) {
-    console.error('Error deleting all sightings:', err);
-    Alert.alert('Error', 'Could not delete all sightings.');
-  }
-}
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -88,6 +82,7 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
+
 
 function MapScreen({ navigation, route }) {
   const [devDeleteName, setDevDeleteName] = useState('');
@@ -97,9 +92,9 @@ function MapScreen({ navigation, route }) {
   const [sightings, setSightings] = useState([]);
   const [mapRegion, setMapRegion] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
-  const [showDebug, setShowDebug] = useState(true);
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
+  const [userId, setUserId] = useState(null);
   const [favorites, setFavorites] = useState([]);
   const mapRef = useRef(null);
   const markerRefs = useRef({});
@@ -135,8 +130,10 @@ function MapScreen({ navigation, route }) {
     (async () => {
       const type = await AsyncStorage.getItem('userType');
       const email = await AsyncStorage.getItem('userEmail');
+      const id = await AsyncStorage.getItem('userId');
       setUserType(type);
       setUserEmail(email);
+      setUserId(id);
     })();
   
     return () => {
@@ -146,12 +143,13 @@ function MapScreen({ navigation, route }) {
   
 
   useEffect(() => {
-    if (!userEmail || userType !== 'user') {
+    if (!(userId || userEmail) || userType !== 'user') {
       setFavorites([]);
       return;
     }
 
-    const favRef = doc(db, 'favorites', userEmail);
+    const docKey = userId || userEmail;
+    const favRef = doc(db, 'favorites', docKey);
     const unsub = onSnapshot(favRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -162,7 +160,7 @@ function MapScreen({ navigation, route }) {
     }, (err) => console.error('favorites onSnapshot error (map):', err));
 
     return () => unsub();
-  }, [userEmail, userType]);
+  }, [userId, userEmail, userType]);
 
   // truck focus
   useEffect(() => {
@@ -374,9 +372,9 @@ function MapScreen({ navigation, route }) {
 
   const getMarkerDescription = (sighting) => {
     if (sighting.status === 'pending') {
-      return `${sighting.cuisineType} • ${sighting.crowdLevel} • ⏳ Pending Verification`;
+      return `${sighting.cuisineType} • ${sighting.crowdLevel} • Verification: Pending `;
     }
-    return `${sighting.cuisineType} • ${sighting.crowdLevel} • ✅ Verified`;
+    return `${sighting.cuisineType} • ${sighting.crowdLevel} • Verification: Verified`;
   };
 
   // Only show markers with valid coordinates
@@ -412,7 +410,7 @@ function MapScreen({ navigation, route }) {
 
   const toggleFavorite = async (sighting) => {
     console.log('toggleFavorite called for', sighting.foodTruckName);
-    if (!userEmail) {
+    if (!(userId || userEmail)) {
       Alert.alert('Not logged in', 'Please log in to pin trucks.');
       return;
     }
@@ -423,7 +421,8 @@ function MapScreen({ navigation, route }) {
     }
 
     const name = sighting.foodTruckName;
-    const favRef = doc(db, 'favorites', userEmail);
+    const docKey = userId || userEmail;
+    const favRef = doc(db, 'favorites', docKey);
 
     try {
       const isFavorited = favorites && favorites.includes(name);
@@ -511,12 +510,26 @@ function MapScreen({ navigation, route }) {
     }
   };
 
+  const fetchAdminOnce = async () => {
+    try {
+      const uid = auth?.currentUser?.uid || (await AsyncStorage.getItem('userId'));
+      if (!uid) return Alert.alert('No user', 'Not signed in or no stored userId');
+      const uref = doc(db, 'users', uid);
+      const snap = await getDoc(uref);
+      if (!snap.exists()) return Alert.alert('User doc not found', `users/${uid} does not exist`);
+      const data = snap.data();
+      return Alert.alert('User doc', `uid: ${uid}\nadmin: ${!!data.isAdmin}\n\n${JSON.stringify(data, null, 2)}`);
+    } catch (err) {
+      return Alert.alert('Fetch error', String(err.message || err));
+    }
+  };
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity onPress={() => setShowDebug(!showDebug)} style={{ marginRight: 15 }}>
-            <Text style={{ fontSize: 24, color: '#007AFF' }}>🐛</Text>
+          <TouchableOpacity onPress={fetchAdminOnce} style={{ marginRight: 12 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#007AFF' }}>Check</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={handleRefresh} style={{ marginRight: 15 }}>
             <Text style={{ fontSize: 32, fontWeight: '700', color: '#007AFF' }}>⟳</Text>
@@ -524,7 +537,7 @@ function MapScreen({ navigation, route }) {
         </View>
       ),
     });
-  }, [navigation, showDebug]);
+  }, [navigation]);
 
   if (loading) {
     return (
@@ -768,66 +781,7 @@ function MapScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
-      
-      {/* Debug Panel */}
-      {showDebug && (
-        <View style={styles.debugPanel}>
-          <Text style={styles.debugText}>DEBUG INFO - VERIFICATION STATUS</Text>
-          <Text style={styles.debugText}>Your Location: {location ? `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}` : 'Unknown'}</Text>
-          <Text style={styles.debugText}>Total Sightings: {sightings.length}</Text>
-          <Text style={styles.debugText}>Valid Markers: {validMarkers.length}</Text>
-          <Text style={styles.debugText}> Verified: {validMarkers.filter(m => m.status === 'verified').length}</Text>
-          <Text style={styles.debugText}> Pending: {validMarkers.filter(m => m.status === 'pending').length}</Text>
-          {validMarkers.map((marker, index) => (
-            <Text key={marker.id} style={[
-              styles.debugText,
-              marker.status === 'verified' ? { color: 'lightgreen', fontWeight: 'bold' } : { color: 'white' }
-            ]}>
-              {index + 1}. {marker.foodTruckName}: {marker.location.latitude.toFixed(6)}, {marker.location.longitude.toFixed(6)} - {marker.status.toUpperCase()}
-            </Text>
-          ))}
-          <TouchableOpacity onPress={centerOnMarkers} style={styles.debugButton}>
-            <Text style={styles.debugButtonText}> Center on Markers</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleRefresh} style={[styles.debugButton, { backgroundColor: '#FF9500', marginTop: 5 }]}>
-            <Text style={styles.debugButtonText}> Force Refresh</Text>
-          </TouchableOpacity>
 
-          {/* Debug input for delete-by-name */}
-          <View style={{ marginTop: 10 }}>
-            <Text style={[styles.debugText, { fontWeight: '700', marginBottom: 4 }]}>
-              Danger Zone (Dev)
-            </Text>
-
-            <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-              <Text style={[styles.debugText, { width: 80 }]}>Truck:</Text>
-              <View style={{ flex: 1, backgroundColor: 'white', borderRadius: 6, paddingHorizontal: 8 }}>
-                <TextInput
-                  placeholder="Enter exact name"
-                  onChangeText={(t) => setDevDeleteName(t)}
-                  value={devDeleteName}
-                  style={{ height: 34 }}
-                />
-              </View>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => deleteByTruckName(devDeleteName)}
-              style={[styles.debugButton, { backgroundColor: '#D0021B', marginTop: 6 }]}
-            >
-              <Text style={styles.debugButtonText}> Delete by Truck Name</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={deleteAllSightings}
-              style={[styles.debugButton, { backgroundColor: '#9500FF', marginTop: 6 }]}
-            >
-              <Text style={styles.debugButtonText}> Delete ALL Sightings</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-      
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Map Legend</Text>
         <View style={styles.legendItem}>
@@ -855,7 +809,7 @@ function MapScreen({ navigation, route }) {
   );
 }
 
-function MainApp() {
+function MainApp({ isAdmin }) {
   return (
     <Tab.Navigator
       screenOptions={{
@@ -868,13 +822,15 @@ function MainApp() {
         name="Map"
         options={{
           headerShown: false,
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>🗺️</Text>,
-          title: 'Food Truck Map',
+          title: 'Map',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="map-outline" size={size} color={color} />
+          ),
         }}
       >
         {() => (
           <Stack.Navigator>
-            <Stack.Screen name="Food Truck Map" component={MapScreen} options={{ title: "Food Truck Map" }} />
+            <Stack.Screen name="Map" component={MapScreen} options={{ title: "Map" }} />
           </Stack.Navigator>
         )}
       </Tab.Screen>
@@ -884,17 +840,32 @@ function MainApp() {
         component={ReportScreen}
         options={{
           title: 'Report Sighting',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>📝</Text>,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="create-outline" size={size} color={color} />
+          ),
         }}
       />
+
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>👤</Text>,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-circle-outline" size={size} color={color} />
+          ),
         }}
       />
+      {isAdmin && (
+        <Tab.Screen
+          name="Dashboard"
+          component={DashboardScreen}
+          options={{
+            title: 'Dashboard',
+            tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>📊</Text>,
+          }}
+        />
+      )}
     </Tab.Navigator>
   );
 }
@@ -902,14 +873,94 @@ function MainApp() {
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [hasUserType, setHasUserType] = useState(false);
+  const [userId, setUserId] = useState(null);
+  const [userDoc, setUserDoc] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+
 
   useEffect(() => {
     const checkUserType = async () => {
-      const userType = await AsyncStorage.getItem("userType");
-      setHasUserType(!!userType);
-      setLoading(false);
+      try {
+        const userType = await AsyncStorage.getItem("userType");
+        setHasUserType(!!userType);
+        // also load stored userId if present
+        const storedId = await AsyncStorage.getItem('userId');
+        if (storedId) setUserId(storedId);
+        // If there's no authenticated user but we have a stored userId, try to read the users/{uid} doc as a fallback.
+        // This will only succeed if your Firestore rules allow reads without auth or allow reads for that uid.
+        try {
+          if (!auth.currentUser && storedId) {
+            const uref = doc(db, 'users', storedId);
+            const snap = await getDoc(uref);
+            if (snap.exists()) {
+              const data = snap.data();
+              setUserDoc(data);
+              const adminFlag = !!data.isAdmin;
+              setIsAdmin(adminFlag);
+            }
+          }
+        } catch (readErr) {
+          // fallback read failed; silently ignore to avoid noisy logs
+        }
+      } catch (err) {
+        // AsyncStorage error; ignore for now
+      } finally {
+        setLoading(false);
+      }
     };
     checkUserType();
+
+    // listen for auth state changes to refresh isAdmin
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      // Run async work inside an IIFE so we don't pass an async fn directly to the listener
+      (async () => {
+        try {
+          const uid = user?.uid;
+          if (!uid) {
+            setUserId(null);
+            setIsAdmin(false);
+            setUserDoc(null);
+            return;
+          }
+
+          // At this point we have a uid
+          setUserId(uid);
+          const uref = doc(db, 'users', uid);
+          const snap = await getDoc(uref);
+          const adminFlag = snap.exists() && !!snap.data().isAdmin;
+          setIsAdmin(adminFlag);
+          setUserDoc(snap.exists() ? snap.data() : null);
+        } catch (err) {
+          setIsAdmin(false);
+          setUserDoc(null);
+        }
+      })();
+    });
+
+    // Also check current user immediately in case auth state is already established
+    try {
+      const current = auth.currentUser;
+      if (current?.uid) {
+        (async () => {
+          try {
+            const curUid = current.uid;
+            const uref = doc(db, 'users', curUid);
+            const snap = await getDoc(uref);
+            const adminFlag = snap.exists() && !!snap.data().isAdmin;
+            setIsAdmin(adminFlag);
+            setUserId(curUid);
+            setUserDoc(snap.exists() ? snap.data() : null);
+          } catch (err) {
+            setUserDoc(null);
+          }
+        })();
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return () => unsubAuth();
   }, []);
 
   if (loading) {
@@ -921,12 +972,22 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="MainApp" component={MainApp} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ErrorBoundary>
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="MainApp">
+            {(props) => <MainApp {...props} isAdmin={isAdmin} />}
+          </Stack.Screen>
+        </Stack.Navigator>
+        {/* DEBUG badge showing current auth uid, isAdmin flag, and fetched users/{uid} doc */}
+        <View style={{ position: 'absolute', top: 36, right: 12, backgroundColor: 'rgba(0,0,0,0.82)', padding: 8, borderRadius: 8, zIndex: 999, maxWidth: 260 }}>
+          <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>Auth UID:</Text>
+          <Text style={{ color: 'white', fontSize: 11, marginBottom: 6 }}>{userId || 'none'}</Text>
+          <Text style={{ color: isAdmin ? '#4CD964' : '#FF3B30', fontWeight: '700', fontSize: 13 }}>{`admin: ${isAdmin}`}</Text>
+        </View>
+      </NavigationContainer>
+    </ErrorBoundary>
   );
 }
 
