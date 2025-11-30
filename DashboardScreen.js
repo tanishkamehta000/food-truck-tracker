@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, ScrollView } from 'react-native';
-import { collection, getDocs } from 'firebase/firestore';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { collection, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from './firebaseConfig';
 
 export default function DashboardScreen({ navigation }) {
@@ -8,6 +8,11 @@ export default function DashboardScreen({ navigation }) {
   const [userCount, setUserCount] = useState(0);
   const [error, setError] = useState(null);
   const [docs, setDocs] = useState([]);
+  const [metrics, setMetrics] = useState(null);
+  
+  //now have a new thing for feature flags (just for now since we actually have another dashboard that we ended up using for tracking
+  const [verificationMode, setVerificationMode] = useState('blocking');
+  const [savingFlag, setSavingFlag] = useState(false);
 
   useEffect(() => {
     if (!auth.currentUser) {
@@ -15,7 +20,41 @@ export default function DashboardScreen({ navigation }) {
       return;
     }
     fetchUsers();
+    loadFeatureFlag();
   }, []);
+
+  const loadFeatureFlag = async () => {
+    try {
+      const flagRef = doc(db, 'featureFlags', 'vendorVerification');
+      const snap = await getDoc(flagRef);
+      if (snap.exists()) {
+        setVerificationMode(snap.data().mode || 'blocking');
+      }
+    } catch (err) {
+      console.error('Failed to load feature flag', err);
+    }
+  };
+
+  const updateVerificationMode = async (newMode) => {
+    setSavingFlag(true);
+    try {
+      const flagRef = doc(db, 'featureFlags', 'vendorVerification');
+      await setDoc(flagRef, {
+        mode: newMode,
+        enabled: true,
+        lastUpdated: new Date().toISOString(),
+        updatedBy: auth.currentUser?.email || 'unknown',
+        description: 'Controls vendor verification UX flow'
+      });
+      setVerificationMode(newMode);
+      Alert.alert('Success', `Verification mode set to: ${newMode}`);
+    } catch (err) {
+      console.error('Failed to update feature flag', err);
+      Alert.alert('Error', 'Could not update feature flag');
+    } finally {
+      setSavingFlag(false);
+    }
+  };
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -32,8 +71,6 @@ export default function DashboardScreen({ navigation }) {
     }
   };
 
-  const [metrics, setMetrics] = useState(null);
-
   const computeMetrics = async () => {
     setLoading(true);
     setError(null);
@@ -47,7 +84,7 @@ export default function DashboardScreen({ navigation }) {
 
       const totalUsers = usersSnap.size;
 
-      // Average pinned trucks per person (use total users as denominator)
+      // avg pinned trucks per person (/total users)
       let sumPinned = 0;
       favSnap.forEach(d => {
         const data = d.data();
@@ -57,7 +94,7 @@ export default function DashboardScreen({ navigation }) {
 
       const totalReports = sightingsSnap.size;
 
-      // Average reports per user (based on reporterId/email)
+      // this should be avg reports per user
       const reporterSet = new Set();
       sightingsSnap.forEach(d => {
         const s = d.data();
@@ -67,17 +104,17 @@ export default function DashboardScreen({ navigation }) {
       const uniqueReporters = reporterSet.size;
       const avgReportsPerUser = uniqueReporters > 0 ? (totalReports / uniqueReporters) : 0;
 
-      // Average issues reported: use confirmationCount where available
+      // avg issues reported vs confirmation counts
       let sumConfirmations = 0;
       sightingsSnap.forEach(d => { sumConfirmations += Number(d.data().confirmationCount || 1); });
       const avgIssuesReported = totalReports > 0 ? (sumConfirmations / totalReports) : 0;
 
-      // Average issues reported per truck
+      // avg issues reported for truck
       const trucks = new Map();
       sightingsSnap.forEach(d => { const n = d.data().foodTruckName || 'unknown'; trucks.set(n, (trucks.get(n)||0)+1); });
       const avgIssuesPerTruck = trucks.size > 0 ? (totalReports / trucks.size) : 0;
 
-      // Top 3 trucks this week
+      // top 3 truck sightings (how many sightings each truck has)
       const oneWeekAgo = new Date(Date.now() - 7*24*60*60*1000);
       const countsThisWeek = {};
       sightingsSnap.forEach(d => {
@@ -91,7 +128,7 @@ export default function DashboardScreen({ navigation }) {
       });
       const topTrucksThisWeek = Object.entries(countsThisWeek).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([name,count])=>({name,count}));
 
-      // Average reports per day per vendor (over last 7 days)
+      // avg reports per day per vendor
       const vendorDocs = vendorsSnap.docs.map(d=>({id:d.id, ...d.data()}));
       const reportsLast7 = {};
       sightingsSnap.forEach(d => {
@@ -105,7 +142,7 @@ export default function DashboardScreen({ navigation }) {
       });
       const perVendorPerDay = vendorDocs.length > 0 ? (vendorDocs.reduce((sum,v)=>sum + ((reportsLast7[v.truckName]||0)/7),0) / vendorDocs.length) : 0;
 
-      // Ratings: compute avg if vendors have rating fields
+      // ratings: must compute avg
       const ratings = [];
       vendorDocs.forEach(v => {
         const r = v.avgRating ?? v.rating ?? v.ratingAverage ?? null;
@@ -156,6 +193,7 @@ export default function DashboardScreen({ navigation }) {
     );
   }
 
+  //if something goes wrong we'll try to figure it out 
   if (error) {
     return (
       <View style={styles.container}>
@@ -185,10 +223,71 @@ export default function DashboardScreen({ navigation }) {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container}>
       <Text style={styles.title}>Admin Dashboard</Text>
 
+      {/* this is for feature flags */}
+      <View style={[styles.card, { marginBottom: 16 }]}>
+        <Text style={styles.sectionTitle}>Feature Flags</Text>
+        
+        <View style={{ marginTop: 12 }}>
+          <Text style={{ fontWeight: '600', marginBottom: 8 }}>
+            Vendor Verification Mode: <Text style={{ color: '#007AFF' }}>{verificationMode}</Text>
+          </Text>
+          
+          <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+            <TouchableOpacity
+              style={[
+                styles.modeButton,
+                verificationMode === 'blocking' && styles.modeButtonActive
+              ]}
+              onPress={() => updateVerificationMode('blocking')}
+              disabled={savingFlag}
+            >
+              <Text style={[
+                styles.modeButtonText,
+                verificationMode === 'blocking' && styles.modeButtonTextActive
+              ]}>
+                🔒 Blocking
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.modeButton,
+                verificationMode === 'non-blocking' && styles.modeButtonActive,
+                { marginLeft: 8 }
+              ]}
+              onPress={() => updateVerificationMode('non-blocking')}
+              disabled={savingFlag}
+            >
+              <Text style={[
+                styles.modeButtonText,
+                verificationMode === 'non-blocking' && styles.modeButtonTextActive
+              ]}>
+                📢 Banner Only
+              </Text>
+            </TouchableOpacity>
+          </View>
+          
+          {savingFlag && (
+            <ActivityIndicator style={{ marginTop: 8 }} color="#007AFF" />
+          )}
+          
+          <View style={styles.infoBox}>
+            <Text style={styles.infoText}>
+              <Text style={{ fontWeight: '700' }}>Blocking:</Text> Unverified vendors cannot access Report/Profile/Discover tabs
+            </Text>
+            <Text style={styles.infoText}>
+              <Text style={{ fontWeight: '700' }}>Banner:</Text> Unverified vendors see reminder banner but have full access
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* this is the same as before with metrics */}
       <View style={styles.card}>
+        <Text style={styles.sectionTitle}>📊 Metrics</Text>
         <Text style={styles.metricLabel}>Total users</Text>
         <Text style={styles.metricValue}>{userCount}</Text>
 
@@ -219,7 +318,7 @@ export default function DashboardScreen({ navigation }) {
           </View>
         )}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -228,7 +327,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   title: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
   card: { padding: 16, borderRadius: 8, backgroundColor: '#f5f5f5' },
-
+  sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8 },
   metricLabel: { color: '#666', marginBottom: 6 },
   metricValue: { fontSize: 28, fontWeight: '800' },
 
@@ -237,6 +336,39 @@ const styles = StyleSheet.create({
 
   refreshButton: { marginTop: 12, backgroundColor: '#007AFF', padding: 8, borderRadius: 6, alignItems: 'center' },
   refreshButtonText: { color: 'white', fontWeight: '700' },
+
+  modeButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#ddd',
+    backgroundColor: '#f5f5f5',
+    alignItems: 'center',
+  },
+  modeButtonActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#E3F2FD',
+  },
+  modeButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  modeButtonTextActive: {
+    color: '#007AFF',
+  },
+  infoBox: {
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 6,
+    marginTop: 8,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
 
   docRow: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#eee' },
   docId: { fontSize: 12, fontFamily: 'monospace' },
