@@ -30,8 +30,8 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
-  setDoc, getDoc,
-  getDoc,
+  setDoc,
+  getDoc, 
   addDoc,  
 } from 'firebase/firestore';
 import { auth } from './firebaseConfig';
@@ -44,7 +44,6 @@ import ProfileScreen from './ProfileScreen';
 import DashboardScreen from './DashboardScreen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-//testing these need to verify w/ Tanishka and Alvin that this is working
 import VendorPhotoVerificationScreen from './VendorPhotoVerificationScreen';
 import VendorPendingScreen from './VendorPendingScreen';
 
@@ -1070,7 +1069,7 @@ function VendorBlockedScreen({ screenName }) {
         const status = vendorDoc.data().verificationStatus;
         setVendorStatus(status);
         
-        // should auto redirect - don't show blocked screen
+        //will redirect i pending instead of showing blocked screen - is working currently
         if (status === 'pending_photo') {
           navigation.navigate('Map', { screen: 'VendorPendingScreen' });
           return;
@@ -1108,7 +1107,7 @@ function VendorBlockedScreen({ screenName }) {
     );
   }
 
-  // if the vendor is pending they can see that they're pending
+  // if pending making sure that the person is redirected
   if (vendorStatus === 'pending_photo') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -1147,7 +1146,7 @@ function VendorBlockedScreen({ screenName }) {
         onPress={handleGetVerified}
       >
         <Text style={styles.blockedButtonText}>
-          Get Verified Now
+          📸 Get Verified Now
         </Text>
       </TouchableOpacity>
 
@@ -1159,7 +1158,6 @@ function VendorBlockedScreen({ screenName }) {
 }
 
 function MainApp({ isAdmin }) {
-
   const [loading, setLoading] = useState(true);
   const [vendorVerified, setVendorVerified] = useState(false);
   const [userType, setUserType] = useState(null);
@@ -1177,14 +1175,14 @@ function MainApp({ isAdmin }) {
       setUserType(type);
       setUserEmail(email);
 
-      //checking if vendor and then verifying
+      // only need to check for vendors
       if (type !== 'vendor') {
-        setVendorVerified(true); //making sure that regular users still have access
+        setVendorVerified(true);
         setLoading(false);
         return;
       }
 
-      //if you're not verified then can't acess
+      // checking status
       if (!email) {
         setLoading(false);
         return;
@@ -1194,7 +1192,7 @@ function MainApp({ isAdmin }) {
       const vendorDoc = await getDoc(vendorRef);
       
       if (!vendorDoc.exists()) {
-        // no vendor profile - needs to apply
+        // if no profile need to apply
         setVendorVerified(false);
         setLoading(false);
         return;
@@ -1224,7 +1222,6 @@ function MainApp({ isAdmin }) {
     );
   }
 
-
   return (
     <Tab.Navigator
       screenOptions={{
@@ -1233,6 +1230,7 @@ function MainApp({ isAdmin }) {
         tabBarStyle: { paddingVertical: 5, backgroundColor: 'white' },
       }}
     >
+      {/* mapping tab remains accessible */}
       <Tab.Screen
         name="Map"
         options={{
@@ -1246,7 +1244,6 @@ function MainApp({ isAdmin }) {
         {() => (
           <Stack.Navigator>
             <Stack.Screen 
-            //making sure that the rest of the photo verification functions are there now
               name="Map" 
               component={MapScreen} 
               options={{ title: "Map" }} 
@@ -1265,14 +1262,51 @@ function MainApp({ isAdmin }) {
         )}
       </Tab.Screen>
 
-      {/* report tab */}
+      {/* discover tab is blocked if not verified */}
       <Tab.Screen
         name="Discover"
-        component={DiscoverScreen}
         options={{
           title: 'Discover',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="star-outline" size={size} color={color} />
+          ),
+        }}
+      >
+        {() => 
+          userType === 'vendor' && !vendorVerified ? (
+            <VendorBlockedScreen screenName="Discover" />
+          ) : (
+            <DiscoverScreen />
+          )
+        }
+      </Tab.Screen>
+
+      {/* profile tab is blocked if unverified */}
+      <Tab.Screen
+        name="Profile"
+        options={{
+          title: 'Profile',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-circle-outline" size={size} color={color} />
+          ),
+        }}
+      >
+        {() => 
+          userType === 'vendor' && !vendorVerified ? (
+            <VendorBlockedScreen screenName="Profile" />
+          ) : (
+            <ProfileScreen />
+          )
+        }
+      </Tab.Screen>
+
+      {/* Report Tab - BLOCKED for unverified vendors */}
+      <Tab.Screen
+        name="Report"
+        options={{
+          title: 'Report Sighting',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="create-outline" size={size} color={color} />
           ),
         }}
       >
@@ -1285,30 +1319,7 @@ function MainApp({ isAdmin }) {
         }
       </Tab.Screen>
 
-      {/* profile tab - double check this basically need to verify if not verified */}
-
-      <Tab.Screen
-        name="Profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-circle-outline" size={size} color={color} />
-          ),
-        }}
-      />
-
-      <Tab.Screen
-        name="Report"
-        component={ReportScreen}
-        options={{
-          title: 'Report Sighting',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="create-outline" size={size} color={color} />
-          ),
-        }}
-      />
-
-      
+      {/* dashboard tab for admin */}
       {isAdmin && (
         <Tab.Screen
           name="Dashboard"
@@ -1435,12 +1446,6 @@ export default function App() {
             {(props) => <MainApp {...props} isAdmin={isAdmin} />}
           </Stack.Screen>
         </Stack.Navigator>
-        {/* DEBUG badge showing current auth uid, isAdmin flag, and fetched users/{uid} doc */}
-        <View style={{ position: 'absolute', top: 36, right: 12, backgroundColor: 'rgba(0,0,0,0.82)', padding: 8, borderRadius: 8, zIndex: 999, maxWidth: 260 }}>
-          <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>Auth UID:</Text>
-          <Text style={{ color: 'white', fontSize: 11, marginBottom: 6 }}>{userId || 'none'}</Text>
-          <Text style={{ color: isAdmin ? '#4CD964' : '#FF3B30', fontWeight: '700', fontSize: 13 }}>{`admin: ${isAdmin}`}</Text>
-        </View>
       </NavigationContainer>
     </ErrorBoundary>
   );
@@ -1632,15 +1637,15 @@ blockedFooter: {
     width: 18,
     textAlign: 'center',
     marginRight: 6,
-    color: '#6B7280', // gray-600
+    color: '#6B7280', 
   },
   statText: {
     fontSize: 12,
-    color: '#6B7280', // gray-600
+    color: '#6B7280', 
   },
   statDivider: {
     height: 1,
-    backgroundColor: '#E5E7EB', // gray-200
+    backgroundColor: '#E5E7EB', 
     marginTop: 6,
     marginBottom: 8,
   },
