@@ -12,6 +12,7 @@ export default function DashboardScreen({ navigation }) {
   
   //now have a new thing for feature flags (just for now since we actually have another dashboard that we ended up using for tracking
   const [verificationMode, setVerificationMode] = useState('blocking');
+  const [verificationMethod, setVerificationMethod] = useState('both');
   const [savingFlag, setSavingFlag] = useState(false);
 
   useEffect(() => {
@@ -28,7 +29,9 @@ export default function DashboardScreen({ navigation }) {
       const flagRef = doc(db, 'featureFlags', 'vendorVerification');
       const snap = await getDoc(flagRef);
       if (snap.exists()) {
-        setVerificationMode(snap.data().mode || 'blocking');
+        const data = snap.data() || {};
+        setVerificationMode(data.mode || 'blocking');
+        setVerificationMethod(data.method || 'both');
       }
     } catch (err) {
       console.error('Failed to load feature flag', err);
@@ -39,7 +42,9 @@ export default function DashboardScreen({ navigation }) {
     setSavingFlag(true);
     try {
       const flagRef = doc(db, 'featureFlags', 'vendorVerification');
+      const existing = (await getDoc(flagRef)).data() || {};
       await setDoc(flagRef, {
+        ...existing,
         mode: newMode,
         enabled: true,
         lastUpdated: new Date().toISOString(),
@@ -48,6 +53,28 @@ export default function DashboardScreen({ navigation }) {
       });
       setVerificationMode(newMode);
       Alert.alert('Success', `Verification mode set to: ${newMode}`);
+    } catch (err) {
+      console.error('Failed to update feature flag', err);
+      Alert.alert('Error', 'Could not update feature flag');
+    } finally {
+      setSavingFlag(false);
+    }
+  };
+
+  const updateVerificationMethod = async (newMethod) => {
+    setSavingFlag(true);
+    try {
+      const flagRef = doc(db, 'featureFlags', 'vendorVerification');
+      const existing = (await getDoc(flagRef)).data() || {};
+      await setDoc(flagRef, {
+        ...existing,
+        method: newMethod,
+        enabled: true,
+        lastUpdated: new Date().toISOString(),
+        updatedBy: auth.currentUser?.email || 'unknown',
+      });
+      setVerificationMethod(newMethod);
+      Alert.alert('Success', `Verification method set to: ${newMethod}`);
     } catch (err) {
       console.error('Failed to update feature flag', err);
       Alert.alert('Error', 'Could not update feature flag');
@@ -248,7 +275,7 @@ export default function DashboardScreen({ navigation }) {
                 styles.modeButtonText,
                 verificationMode === 'blocking' && styles.modeButtonTextActive
               ]}>
-                🔒 Blocking
+                Block Access
               </Text>
             </TouchableOpacity>
             
@@ -265,23 +292,58 @@ export default function DashboardScreen({ navigation }) {
                 styles.modeButtonText,
                 verificationMode === 'non-blocking' && styles.modeButtonTextActive
               ]}>
-                📢 Banner Only
+                Banner Only
               </Text>
             </TouchableOpacity>
+          </View>
+
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ fontWeight: '600', marginBottom: 8 }}>
+              Verification Method: <Text style={{ color: '#007AFF' }}>{verificationMethod}</Text>
+            </Text>
+
+            <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+              <TouchableOpacity
+                style={[styles.modeButton, verificationMethod === 'photo' && styles.modeButtonActive]}
+                onPress={() => updateVerificationMethod('photo')}
+                disabled={savingFlag}
+              >
+                <Text style={[styles.modeButtonText, verificationMethod === 'photo' && styles.modeButtonTextActive]}>Photo Proof</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modeButton, verificationMethod === 'community' && styles.modeButtonActive, { marginLeft: 8 }]}
+                onPress={() => updateVerificationMethod('community')}
+                disabled={savingFlag}
+              >
+                <Text style={[styles.modeButtonText, verificationMethod === 'community' && styles.modeButtonTextActive]}>Crowd Approval</Text>
+              </TouchableOpacity>
+
+            </View>
+
+            {savingFlag && (
+              <ActivityIndicator style={{ marginTop: 8 }} color="#007AFF" />
+            )}
+
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>
+                <Text style={{ fontWeight: '700' }}>Blocking:</Text> Unverified vendors cannot access Report/Profile/Discover tabs
+              </Text>
+              <Text style={styles.infoText}>
+                <Text style={{ fontWeight: '700' }}>Banner:</Text> Unverified vendors see reminder banner but have full access
+              </Text>
+            </View>
+
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}><Text style={{ fontWeight: '700' }}>Photo Proof:</Text> Vendors must submit photo verification to be approved.</Text>
+              <Text style={styles.infoText}><Text style={{ fontWeight: '700' }}>Crowd Approval:</Text> Vendors may be verified automatically via community confirmations.</Text>
+            </View>
           </View>
           
           {savingFlag && (
             <ActivityIndicator style={{ marginTop: 8 }} color="#007AFF" />
           )}
           
-          <View style={styles.infoBox}>
-            <Text style={styles.infoText}>
-              <Text style={{ fontWeight: '700' }}>Blocking:</Text> Unverified vendors cannot access Report/Profile/Discover tabs
-            </Text>
-            <Text style={styles.infoText}>
-              <Text style={{ fontWeight: '700' }}>Banner:</Text> Unverified vendors see reminder banner but have full access
-            </Text>
-          </View>
         </View>
       </View>
 

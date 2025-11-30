@@ -1056,6 +1056,7 @@ function MainApp({ isAdmin }) {
   
   //now have a feature flag state
   const [verificationMode, setVerificationMode] = useState('blocking'); // just defaulting to blocking
+  const [verificationMethod, setVerificationMethod] = useState('both');
 
   useEffect(() => {
     checkVendorStatus();
@@ -1066,12 +1067,16 @@ function MainApp({ isAdmin }) {
       flagRef,
       (snap) => {
         if (snap.exists()) {
-          const mode = snap.data().mode || 'blocking';
+          const data = snap.data() || {};
+          const mode = data.mode || 'blocking';
+          const method = data.method || 'both';
           setVerificationMode(mode);
-          console.log('Feature flag updated:', mode);
+          setVerificationMethod(method);
+          console.log('Feature flag updated:', { mode, method });
         } else {
           // if flag doesn't exist we need to go back to blocking
           setVerificationMode('blocking');
+          setVerificationMethod('both');
         }
       },
       (err) => {
@@ -1239,7 +1244,7 @@ function MainApp({ isAdmin }) {
       <Tab.Screen
         name="Report"
         options={{
-          title: 'Report Sighting',
+          title: 'Report',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="create-outline" size={size} color={color} />
           ),
@@ -1254,7 +1259,7 @@ function MainApp({ isAdmin }) {
               {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
                 <VerificationReminderBanner />
               ) : null}
-              <ReportScreen navigation={navigation} route={route} />
+              <ReportScreen navigation={navigation} route={route} verificationMethod={verificationMethod} />
             </>
           );
         }}

@@ -36,7 +36,7 @@ const CUISINE_TYPES = [
 
 const INVENTORY_LEVELS = ['Plenty', 'Running Low', 'Almost Out'];
 
-export default function ReportScreen({ navigation }) {
+export default function ReportScreen({ navigation, verificationMethod = 'both' }) {
   const [favoriteItemInput, setFavoriteItemInput] = useState('');
   const [favoriteItems, setFavoriteItems] = useState([]);
   const [location, setLocation] = useState(null);
@@ -453,23 +453,42 @@ const simulateMultipleUsers = async () => {
       })));
   
       if (uniqueReporterCount >= 3) {
-        // We have 3 or more UNIQUE confirmations - verify these sightings
-        console.log('🎉 Reached 3 unique confirmations! Verifying sightings...');
-        await verifySighting(allSightings.map(s => s.id));
-        
-        Alert.alert(
-          'Sighting Verified!',
-          `Thanks for confirming! ${foodTruckName} is now verified on the map.`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                navigation.navigate('Map');
-                resetForm();
+        // We have 3 or more UNIQUE confirmations
+        console.log('🎉 Reached 3 unique confirmations!');
+        if (verificationMethod === 'community' || verificationMethod === 'both') {
+          // community verification allowed -> verify sightings
+          console.log('🔔 Community verification in effect: auto-verifying sightings');
+          await verifySighting(allSightings.map(s => s.id));
+          Alert.alert(
+            'Sighting Verified!',
+            `Thanks for confirming! ${foodTruckName} is now verified on the map.`,
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  navigation.navigate('Map');
+                  resetForm();
+                }
               }
-            }
-          ]
-        );
+            ]
+          );
+        } else {
+          // photo-only verification configured -> do not auto-verify via community
+          console.log('⏸ Photo-only verification configured: skipping community auto-verify');
+          Alert.alert(
+            'Report Submitted',
+            `Thanks! ${foodTruckName} has been submitted. This project requires photo verification, so the truck will be visible once the vendor is approved.`,
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  navigation.navigate('Map');
+                  resetForm();
+                }
+              }
+            ]
+          );
+        }
       } else {
         // Not enough confirmations yet
         const needed = 3 - uniqueReporterCount;
