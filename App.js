@@ -1,23 +1,86 @@
+import DiscoverScreen from './DiscoverScreen';
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { StyleSheet, View, Text, Alert, ActivityIndicator, TouchableOpacity, Platform } from 'react-native';
+import {
+  ScrollView,
+  StyleSheet,
+  View,
+  Text,
+  Alert,
+  ActivityIndicator,
+  TouchableOpacity,
+  Modal,
+  Linking,
+  Platform,
+  TextInput, 
+  KeyboardAvoidingView, 
+} from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import MapView, { Marker, Callout } from 'react-native-maps';
-import { collection, onSnapshot, query, getDocs, deleteDoc, doc, updateDoc, arrayUnion, arrayRemove, setDoc, getDoc } from 'firebase/firestore';
+import {
+  collection,
+  where,
+  onSnapshot,
+  query,
+  getDocs,
+  deleteDoc,
+  doc,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
+  setDoc, getDoc,
+  getDoc,
+  addDoc,  
+} from 'firebase/firestore';
+import { auth } from './firebaseConfig';
+import { onAuthStateChanged } from 'firebase/auth';
 import { db } from './firebaseConfig';
 import * as Location from 'expo-location';
 import ReportScreen from './ReportScreen';
-import LoginScreen from "./LoginScreen";
+import LoginScreen from './LoginScreen';
 import ProfileScreen from './ProfileScreen';
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import DashboardScreen from './DashboardScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 //testing these need to verify w/ Tanishka and Alvin that this is working
 import VendorPhotoVerificationScreen from './VendorPhotoVerificationScreen';
 import VendorPendingScreen from './VendorPendingScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, errorInfo: null };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught error:', error, errorInfo);
+    this.setState({ error, errorInfo });
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#111', padding: 12 }}>
+          <Text style={{ color: 'white', fontWeight: '700', marginBottom: 8 }}>App Error</Text>
+          <ScrollView style={{ maxHeight: 400 }}>
+            <Text style={{ color: 'white', fontSize: 12 }}>
+              {String(this.state.error && this.state.error.toString())}
+            </Text>
+            <Text style={{ color: '#ccc', marginTop: 8, fontSize: 11 }}>
+              {this.state.errorInfo ? this.state.errorInfo.componentStack : ''}
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -27,25 +90,86 @@ Notifications.setNotificationHandler({
   }),
 });
 
+
 function MapScreen({ navigation, route }) {
+  const [devDeleteName, setDevDeleteName] = useState('');
   const [location, setLocation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   const [sightings, setSightings] = useState([]);
   const [mapRegion, setMapRegion] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
-  const [showDebug, setShowDebug] = useState(true);
   const [userType, setUserType] = useState(null);
   const [userEmail, setUserEmail] = useState(null);
   const [userId, setUserId] = useState(null);
   const [favorites, setFavorites] = useState([]);
   const mapRef = useRef(null);
   const markerRefs = useRef({});
+  const [selected, setSelected] = useState(null); // the clicked sighting
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [popular, setPopular] = useState([]);     // array of strings, aggregated
+  const [confirmCount, setConfirmCount] = useState(0);
+  const [lastConfirmedMin, setLastConfirmedMin] = useState(null);
+  const [reportedIssues, setReportedIssues] = useState([]);    
+  const [issueModalVisible, setIssueModalVisible] = useState(false);
+  const [issueText, setIssueText] = useState('');
+
+  const loadIssuesForTruck = async (truckName) => {
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, 'reportedIssues'),
+          where('truckName', '==', truckName)
+        )
+      );
+      const issues = snap.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      }));
+      setReportedIssues(issues);
+    } catch (err) {
+      console.error('loadIssuesForTruck error', err);
+      setReportedIssues([]);
+    }
+  };
+
+  const submitIssue = async () => {
+    const text = issueText.trim();
+    if (!selected || !text) {
+      Alert.alert('Missing info', 'Please enter an issue description.');
+      return;
+    }
+  
+    try {
+      await addDoc(collection(db, 'reportedIssues'), {
+        truckName: selected.foodTruckName,
+        sightingId: selected.id,
+        reporterId: userId || null,
+        reporterEmail: userEmail || null,
+        description: text,
+        createdAt: new Date().toISOString(),
+      });
+  
+      setIssueText('');
+      setIssueModalVisible(false);
+  
+      // reload issues so the new one appears in the list
+      await loadIssuesForTruck(selected.foodTruckName);
+      Alert.alert('Thank you', 'Your issue has been reported.');
+    } catch (err) {
+      console.error('submitIssue error', err);
+      Alert.alert('Error', 'Could not submit issue.');
+    }
+  };
+
+
+
 
   useEffect(() => {
     requestLocationPermission();
     clearOldSightings();
-    setupFirebaseListener();
+    const unsub = setupFirebaseListener();
+  
     // Create Android notification channel
     (async () => {
       try {
@@ -62,6 +186,8 @@ function MapScreen({ navigation, route }) {
         console.warn('Failed to set Android notification channel', err);
       }
     })();
+  
+    // Load user type/email
     (async () => {
       const type = await AsyncStorage.getItem('userType');
       const email = await AsyncStorage.getItem('userEmail');
@@ -70,7 +196,12 @@ function MapScreen({ navigation, route }) {
       setUserEmail(email);
       setUserId(id);
     })();
+  
+    return () => {
+      if (unsub) unsub();
+    };
   }, []);
+  
 
   useEffect(() => {
     if (!(userId || userEmail) || userType !== 'user') {
@@ -128,6 +259,91 @@ function MapScreen({ navigation, route }) {
     try { navigation.setParams({ focusTruckName: null }); } catch (e) { /* ignore */ }
   }, [route?.params, sightings]);
 
+  function getCrowdTextColor(level) {
+    if (level === 'Busy') return '#CC0000';
+    if (level === 'Moderate') return '#C9A900';
+    if (level === 'Light') return '#2E7D32';
+    return '#6B7280';
+  }
+
+  // distance helper (meters)
+  function distanceMeters(lat1, lon1, lat2, lon2) {
+    const R = 6371e3;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) *
+        Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+  }
+
+  // open the bottom sheet and aggregate details for this truck
+  async function openTruckSheet(sighting) {
+    try {
+      setSelected(sighting);
+
+      await loadIssuesForTruck(sighting.foodTruckName);
+
+      // fetch all sightings of the same truck (e.g., last 24h is typical — you can add a date filter later)
+      const snap = await getDocs(
+        query(collection(db, 'sightings'), where('foodTruckName', '==', sighting.foodTruckName))
+      );
+
+      // aggregate popular items + verification stats + latest notes timestamp
+      const itemsFreq = {};
+      let latestISO = null;
+      let latestNotes = sighting.additionalNotes || '';
+      let verifiedCount = 0;
+
+      snap.forEach((d) => {
+        const data = d.data();
+
+        // collect popular items users reported on ReportScreen (favoriteItems: string[])
+        if (Array.isArray(data.favoriteItems)) {
+          data.favoriteItems.forEach((it) => {
+            const key = String(it || '').trim();
+            if (!key) return;
+            itemsFreq[key] = (itemsFreq[key] || 0) + 1;
+          });
+        }
+
+        if (data.status === 'verified') verifiedCount += 1;
+
+        // pick freshest description
+        const raw = data.timestamp || data.verifiedAt || data.createdAt;
+        const ts = raw ? new Date(raw) : null;
+        if (ts && (!latestISO || ts > new Date(latestISO))) {
+          latestISO = ts.toISOString();
+          if ((data.additionalNotes || '').trim()) {
+            latestNotes = data.additionalNotes;
+          }
+        }
+      });
+
+      // turn frequency map into top chips
+      const popularItems = Object.entries(itemsFreq)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name]) => name)
+        .slice(0, 8);
+
+      setPopular(popularItems);
+      setConfirmCount(verifiedCount);
+      setLastConfirmedMin(
+        latestISO ? Math.max(0, Math.round((Date.now() - new Date(latestISO).getTime()) / 60000)) : null
+      );
+
+      // ensure selected carries the freshest notes for display
+      setSelected((prev) => ({ ...prev, additionalNotes: latestNotes }));
+
+      setSheetVisible(true);
+    } catch (e) {
+      console.error('openTruckSheet error', e);
+      setSheetVisible(true); // still show something
+    }
+  }
+
   const setupFirebaseListener = () => {
     const q = query(collection(db, 'sightings'));
     
@@ -158,14 +374,14 @@ function MapScreen({ navigation, route }) {
       setSightings(sortedSightings);
       setLastUpdate(Date.now());
       
-      console.log('🔄 Firebase update - Total sightings:', sortedSightings.length);
-      console.log('✅ Verified:', sortedSightings.filter(s => s.status === 'verified').length);
-      console.log('⏳ Pending:', sortedSightings.filter(s => s.status === 'pending').length);
+      console.log('Firebase update - Total sightings:', sortedSightings.length);
+      console.log('Verified:', sortedSightings.filter(s => s.status === 'verified').length);
+      console.log('Pending:', sortedSightings.filter(s => s.status === 'pending').length);
       
       // debugging
       sortedSightings.forEach(sighting => {
         const hasLocation = sighting.location && sighting.location.latitude && sighting.location.longitude;
-        console.log(`📍 ${sighting.foodTruckName}: ${sighting.status} | Location: ${hasLocation ? '✅' : '❌'} | Coords: ${sighting.location?.latitude}, ${sighting.location?.longitude}`);
+        console.log(`${sighting.foodTruckName}: ${sighting.status} | Location: ${hasLocation ? 'true' : 'false'} | Coords: ${sighting.location?.latitude}, ${sighting.location?.longitude}`);
       });
     });
 
@@ -202,7 +418,7 @@ function MapScreen({ navigation, route }) {
       setMapRegion(userRegion);
       setLoading(false);
       
-      console.log('📍 Your location:', currentLocation.coords.latitude, currentLocation.coords.longitude);
+      console.log('Your location:', currentLocation.coords.latitude, currentLocation.coords.longitude);
     } catch (error) {
       setErrorMsg('Error getting location');
       setLoading(false);
@@ -210,21 +426,18 @@ function MapScreen({ navigation, route }) {
     }
   };
 
-  const getMarkerColor = (status, crowdLevel) => {
-    console.log(`🎨 Getting color for status: ${status}, crowd: ${crowdLevel}`); // Debug color selection
-    if (status === 'verified') return 'green';
-    if (status === 'pending') return 'gray';
+  const getMarkerColor = (crowdLevel) => {
+    if (crowdLevel === 'Light') return 'green';
+    if (crowdLevel === 'Moderate') return 'yellow';
     if (crowdLevel === 'Busy') return 'red';
-    if (crowdLevel === 'Moderate') return 'orange';
-    if (crowdLevel === 'Light') return 'yellow';
-    return 'gray';
+    return 'gray'; // fallback
   };
 
   const getMarkerDescription = (sighting) => {
     if (sighting.status === 'pending') {
-      return `${sighting.cuisineType} • ${sighting.crowdLevel} • ⏳ Pending Verification`;
+      return `${sighting.cuisineType} • ${sighting.crowdLevel} • Verification: Pending `;
     }
-    return `${sighting.cuisineType} • ${sighting.crowdLevel} • ✅ Verified`;
+    return `${sighting.cuisineType} • ${sighting.crowdLevel} • Verification: Verified`;
   };
 
   // Only show markers with valid coordinates
@@ -237,7 +450,7 @@ function MapScreen({ navigation, route }) {
                             typeof sighting.location.longitude === 'number';
       
       if (!hasValidCoords) {
-        console.log('❌ Skipping invalid marker:', sighting.foodTruckName, 'Location:', sighting.location);
+        console.log('Skipping invalid marker:', sighting.foodTruckName, 'Location:', sighting.location);
       }
       
       return hasValidCoords;
@@ -253,7 +466,7 @@ function MapScreen({ navigation, route }) {
     });
 
     const uniqueMarkers = Object.values(groupedMarkers);
-    console.log('👥 Unique markers after grouping:', uniqueMarkers.length);
+    console.log('Unique markers after grouping:', uniqueMarkers.length);
     
     return uniqueMarkers;
   };
@@ -329,7 +542,7 @@ function MapScreen({ navigation, route }) {
       await clearOldSightings();
       setupFirebaseListener();
       setLoading(false);
-      console.log("🔄 Map refreshed successfully");
+      console.log("Map refreshed successfully");
     } catch (error) {
       console.error("Error refreshing map:", error);
       setLoading(false);
@@ -356,7 +569,21 @@ function MapScreen({ navigation, route }) {
       };
       
       setMapRegion(newRegion);
-      console.log('🎯 Centered map on markers');
+      console.log('Centered map on markers');
+    }
+  };
+
+  const fetchAdminOnce = async () => {
+    try {
+      const uid = auth?.currentUser?.uid || (await AsyncStorage.getItem('userId'));
+      if (!uid) return Alert.alert('No user', 'Not signed in or no stored userId');
+      const uref = doc(db, 'users', uid);
+      const snap = await getDoc(uref);
+      if (!snap.exists()) return Alert.alert('User doc not found', `users/${uid} does not exist`);
+      const data = snap.data();
+      return Alert.alert('User doc', `uid: ${uid}\nadmin: ${!!data.isAdmin}\n\n${JSON.stringify(data, null, 2)}`);
+    } catch (err) {
+      return Alert.alert('Fetch error', String(err.message || err));
     }
   };
 
@@ -364,8 +591,8 @@ function MapScreen({ navigation, route }) {
     navigation.setOptions({
       headerRight: () => (
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity onPress={() => setShowDebug(!showDebug)} style={{ marginRight: 15 }}>
-            <Text style={{ fontSize: 24, color: '#007AFF' }}>🐛</Text>
+          <TouchableOpacity onPress={fetchAdminOnce} style={{ marginRight: 12 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#007AFF' }}>Check</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={handleRefresh} style={{ marginRight: 15 }}>
             <Text style={{ fontSize: 32, fontWeight: '700', color: '#007AFF' }}>⟳</Text>
@@ -373,7 +600,7 @@ function MapScreen({ navigation, route }) {
         </View>
       ),
     });
-  }, [navigation, showDebug]);
+  }, [navigation]);
 
   if (loading) {
     return (
@@ -394,8 +621,8 @@ function MapScreen({ navigation, route }) {
   }
 
   const validMarkers = getValidMarkers();
-  console.log('🗺️ Rendering markers:', validMarkers.length, 'valid out of', sightings.length, 'total');
-  console.log('📊 Marker status breakdown:', {
+  console.log(' endering markers:', validMarkers.length, 'valid out of', sightings.length, 'total');
+  console.log('Marker status breakdown:', {
     verified: validMarkers.filter(m => m.status === 'verified').length,
     pending: validMarkers.filter(m => m.status === 'pending').length
   });
@@ -405,10 +632,10 @@ function MapScreen({ navigation, route }) {
       <MapView
         ref={mapRef}
         style={styles.map}
-        region={mapRegion} 
+        region={mapRegion}
         showsUserLocation={true}
         showsMyLocationButton={true}
-        onMapReady={() => console.log('🗺️ Map is ready')}
+        onMapReady={() => console.log('Map is ready')}
       >
         {/* Current user location */}
         {location && (
@@ -422,17 +649,17 @@ function MapScreen({ navigation, route }) {
             pinColor="purple"
           />
         )}
-        
-        {/* Food truck sightings - Only valid markers */}
+  
+        {/* Food truck sightings */}
         {validMarkers.map((sighting) => {
-          const markerColor = getMarkerColor(sighting.status, sighting.crowdLevel);
-          console.log(`📍 Rendering marker: ${sighting.foodTruckName} with color: ${markerColor} (status: ${sighting.status})`);
-
+          const markerColor = getMarkerColor(sighting.crowdLevel);
           const isFavorited = favorites && favorites.includes(sighting.foodTruckName);
-
+  
           return (
             <Marker
-              ref={(ref) => { if (ref) markerRefs.current[sighting.id] = ref; }}
+              ref={(ref) => {
+                if (ref) markerRefs.current[sighting.id] = ref;
+              }}
               key={sighting.id}
               coordinate={{
                 latitude: sighting.location.latitude,
@@ -441,12 +668,14 @@ function MapScreen({ navigation, route }) {
               title={sighting.foodTruckName}
               description={getMarkerDescription(sighting)}
               pinColor={markerColor}
+              onPress={() => openTruckSheet(sighting)}
               onCalloutPress={() => toggleFavorite(sighting)}
             >
-              <Callout tooltip={false} onPress={() => { /* noop */ }}>
+              <Callout tooltip={false}>
                 <View style={styles.calloutContainer}>
                   <Text style={styles.calloutTitle}>{sighting.foodTruckName}</Text>
                   <Text style={styles.calloutDesc}>{getMarkerDescription(sighting)}</Text>
+  
                   {userType === 'user' ? (
                     <TouchableOpacity
                       style={[styles.pinButton, isFavorited ? styles.unpinStyle : styles.pinStyle]}
@@ -463,67 +692,359 @@ function MapScreen({ navigation, route }) {
           );
         })}
       </MapView>
-      
-      {/* Debug Panel */}
-      {showDebug && (
-        <View style={styles.debugPanel}>
-          <Text style={styles.debugText}>DEBUG INFO - VERIFICATION STATUS</Text>
-          <Text style={styles.debugText}>Your Location: {location ? `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}` : 'Unknown'}</Text>
-          <Text style={styles.debugText}>Total Sightings: {sightings.length}</Text>
-          <Text style={styles.debugText}>Valid Markers: {validMarkers.length}</Text>
-          <Text style={styles.debugText}>✅ Verified: {validMarkers.filter(m => m.status === 'verified').length}</Text>
-          <Text style={styles.debugText}>⏳ Pending: {validMarkers.filter(m => m.status === 'pending').length}</Text>
-          {validMarkers.map((marker, index) => (
-            <Text key={marker.id} style={[
-              styles.debugText,
-              marker.status === 'verified' ? { color: 'lightgreen', fontWeight: 'bold' } : { color: 'white' }
-            ]}>
-              {index + 1}. {marker.foodTruckName}: {marker.location.latitude.toFixed(6)}, {marker.location.longitude.toFixed(6)} - {marker.status.toUpperCase()}
-            </Text>
-          ))}
-          <TouchableOpacity onPress={centerOnMarkers} style={styles.debugButton}>
-            <Text style={styles.debugButtonText}>🎯 Center on Markers</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleRefresh} style={[styles.debugButton, { backgroundColor: '#FF9500', marginTop: 5 }]}>
-            <Text style={styles.debugButtonText}>🔄 Force Refresh</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      
+  
+      {/* Truck detail bottom-sheet */}
+      <Modal
+        animationType="slide"
+        transparent
+        visible={sheetVisible}
+        onRequestClose={() => {
+          setSheetVisible(false);
+          setIssueModalVisible(false); // reset when closing sheet
+        }}
+      >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={80} // tweak if it’s still a bit low/high
+        >
+          <View style={styles.sheetBackdrop}>
+            {/* tap backdrop to close */}
+            <TouchableOpacity
+              style={{ flex: 1 }}
+              onPress={() => {
+                setSheetVisible(false);
+                setIssueModalVisible(false);
+              }}
+            />
+
+            <View style={styles.sheet}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {/* === DETAILS VIEW === */}
+                {selected && !issueModalVisible && (
+                  <>
+                    {/* Header */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                      <View
+                        style={{
+                          width: 52,
+                          height: 52,
+                          borderRadius: 10,
+                          backgroundColor: '#eee',
+                          marginRight: 12,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Text>📷</Text>
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700' }}>{selected.foodTruckName}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                          <View
+                            style={{
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              backgroundColor: '#f1f5f9',
+                              borderRadius: 6,
+                              marginRight: 8,
+                            }}
+                          >
+                            <Text style={{ fontSize: 12 }}>{selected.cuisineType || '—'}</Text>
+                          </View>
+                          <Text>⭐ 4.8</Text>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={() => {
+                          setSheetVisible(false);
+                          setIssueModalVisible(false);
+                        }}
+                      >
+                        <Text style={{ fontSize: 18 }}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Stats */}
+                    {(() => {
+                      const hasLoc = !!location && !!selected?.location;
+                      const distM = hasLoc
+                        ? distanceMeters(
+                            location.latitude,
+                            location.longitude,
+                            selected.location.latitude,
+                            selected.location.longitude
+                          )
+                        : null;
+
+                      const mins = distM != null ? Math.max(1, Math.round(distM / 80)) : null;
+                      const miles = distM != null ? (distM / 1609.34).toFixed(1) : null;
+
+                      return (
+                        <>
+                          <View style={styles.statGrid}>
+                            <View style={styles.statCol}>
+                              <View style={styles.statItem}>
+                                <Text style={styles.statIcon} />
+                                <Text style={styles.statText}>{mins != null ? `${mins} min` : '—'}</Text>
+                              </View>
+                              <View style={styles.statItem}>
+                                <Text style={styles.statIcon} />
+                                <Text style={styles.statText}>{miles != null ? `${miles} mi` : '—'}</Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.statCol}>
+                              <View style={styles.statItem}>
+                                <Text style={styles.statIcon} />
+                                <Text
+                                  style={[
+                                    styles.statText,
+                                    { color: getCrowdTextColor(selected.crowdLevel), fontWeight: '600' },
+                                  ]}
+                                >
+                                  {selected.crowdLevel ? `${selected.crowdLevel} crowd` : '—'}
+                                </Text>
+                              </View>
+                              <View style={styles.statItem}>
+                                <Text style={styles.statIcon}>✔︎</Text>
+                                <Text style={styles.statText}>
+                                  {lastConfirmedMin != null
+                                    ? `Confirmed ${lastConfirmedMin} min ago`
+                                    : 'Confirmed recently'}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+
+                          <View style={styles.statDivider} />
+                        </>
+                      );
+                    })()}
+
+                    {/* Description */}
+                    <View style={{ marginTop: 6 }}>
+                      <Text style={{ fontSize: 14, color: '#444' }}>
+                        {selected.additionalNotes?.trim() || 'No description yet.'}
+                      </Text>
+                    </View>
+
+                    {/* Popular items */}
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={{ fontWeight: '700', marginBottom: 6 }}>Popular Items</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                        {(popular.length ? popular : ['Carne Asada', 'Fish Tacos', 'Carnitas', 'Elote']).map(
+                          (item, i) => (
+                            <View
+                              key={i}
+                              style={{
+                                paddingVertical: 6,
+                                paddingHorizontal: 10,
+                                backgroundColor: '#f0f0f0',
+                                borderRadius: 16,
+                                marginRight: 6,
+                                marginBottom: 6,
+                              }}
+                            >
+                              <Text>{item}</Text>
+                            </View>
+                          )
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Confirmation count */}
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={{ fontSize: 12, color: '#666' }}>
+                        Location confirmed by {Math.max(confirmCount, 1)} user
+                        {Math.max(confirmCount, 1) === 1 ? '' : 's'}
+                      </Text>
+                    </View>
+
+                    {/* Issues summary */}
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={{ fontSize: 12, color: '#666', fontWeight: '600' }}>
+                        {reportedIssues.length} issue{reportedIssues.length === 1 ? '' : 's'} reported
+                      </Text>
+
+                      {reportedIssues.length > 0 && (
+                        <View style={{ marginTop: 6 }}>
+                          {reportedIssues.slice(0, 3).map((issue) => (
+                            <View key={issue.id} style={{ marginBottom: 4 }}>
+                              <Text style={{ fontSize: 12, color: '#444' }}>• {issue.description}</Text>
+                              {issue.createdAt && (
+                                <Text style={{ fontSize: 10, color: '#999' }}>
+                                  {new Date(issue.createdAt).toLocaleString()}
+                                </Text>
+                              )}
+                            </View>
+                          ))}
+                          {reportedIssues.length > 3 && (
+                            <Text style={{ fontSize: 11, color: '#007AFF', marginTop: 4 }}>
+                              + {reportedIssues.length - 3} more…
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Actions */}
+                    <View style={{ flexDirection: 'row', marginTop: 12 }}>
+                      <TouchableOpacity
+                        onPress={() =>
+                          Alert.alert('Thanks!', 'Your confirmation has been recorded (prototype).')
+                        }
+                        style={{
+                          paddingVertical: 10,
+                          paddingHorizontal: 14,
+                          backgroundColor: '#f5f5f5',
+                          borderRadius: 10,
+                          marginRight: 10,
+                        }}
+                      >
+                        <Text>Confirm</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => setIssueModalVisible(true)}
+                        style={{
+                          paddingVertical: 10,
+                          paddingHorizontal: 14,
+                          backgroundColor: '#f5f5f5',
+                          borderRadius: 10,
+                        }}
+                      >
+                        <Text>Report issue</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Navigate */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        const { latitude, longitude } = selected.location;
+                        const url = Platform.select({
+                          ios: `http://maps.apple.com/?daddr=${latitude},${longitude}`,
+                          android: `geo:0,0?q=${latitude},${longitude}(${encodeURIComponent(
+                            selected.foodTruckName
+                          )})`,
+                        });
+                        Linking.openURL(url);
+                      }}
+                      style={{
+                        marginTop: 16,
+                        backgroundColor: '#0B0B14',
+                        padding: 14,
+                        borderRadius: 12,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ color: 'white', fontWeight: '700' }}>
+                        ▸ Navigate to {selected.foodTruckName}
+                      </Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+
+                {/* === ISSUE FORM VIEW === */}
+                {selected && issueModalVisible && (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 18, fontWeight: '700' }}>
+                          Report an issue for {selected.foodTruckName}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity onPress={() => setIssueModalVisible(false)}>
+                        <Text style={{ fontSize: 18 }}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={{ fontSize: 13, color: '#555', marginBottom: 8 }}>
+                      Example: “Truck not here”, “Wrong hours”, “Pin in wrong spot”, etc.
+                    </Text>
+
+                    <TextInput
+                      style={{
+                        borderWidth: 1,
+                        borderColor: '#ddd',
+                        borderRadius: 8,
+                        padding: 10,
+                        minHeight: 80,
+                        textAlignVertical: 'top',
+                        fontSize: 14,
+                      }}
+                      multiline
+                      placeholder="Describe the issue..."
+                      value={issueText}
+                      onChangeText={setIssueText}
+                    />
+
+                    <View style={{ flexDirection: 'row', marginTop: 12, justifyContent: 'flex-end' }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setIssueModalVisible(false);
+                          setIssueText('');
+                        }}
+                        style={{ paddingVertical: 10, paddingHorizontal: 14, marginRight: 8 }}
+                      >
+                        <Text style={{ color: '#555' }}>Cancel</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={submitIssue}
+                        style={{
+                          paddingVertical: 10,
+                          paddingHorizontal: 18,
+                          backgroundColor: '#007AFF',
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Text style={{ color: 'white', fontWeight: '600' }}>Submit</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+  
+      {/* Legend */}
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Map Legend</Text>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'green' }]} />
-          <Text style={styles.legendText}>Verified</Text>
+          <Text style={styles.legendText}>Light</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: 'gray' }]} />
-          <Text style={styles.legendText}>Pending</Text>
+          <View style={[styles.legendColor, { backgroundColor: 'yellow' }]} />
+          <Text style={styles.legendText}>Moderate</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, { backgroundColor: 'red' }]} />
           <Text style={styles.legendText}>Busy</Text>
         </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: 'orange' }]} />
-          <Text style={styles.legendText}>Moderate</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, { backgroundColor: 'yellow' }]} />
-          <Text style={styles.legendText}>Light Crowd</Text>
-        </View>
       </View>
-
+  
+      {/* Stats Bar */}
       <View style={styles.statsBar}>
         <Text style={styles.statsText}>
-          {validMarkers.filter(s => s.status === 'verified').length} Verified • 
-          {validMarkers.filter(s => s.status === 'pending').length} Pending •
+          {validMarkers.filter((s) => s.status === 'verified').length} Verified •
+          {validMarkers.filter((s) => s.status === 'pending').length} Pending •
           Total: {validMarkers.length}
         </Text>
       </View>
     </View>
   );
-}
+}  
 
 function VendorBlockedScreen({ screenName }) {
   const navigation = useNavigation();
@@ -637,7 +1158,7 @@ function VendorBlockedScreen({ screenName }) {
   );
 }
 
-function MainApp() {
+function MainApp({ isAdmin }) {
 
   const [loading, setLoading] = useState(true);
   const [vendorVerified, setVendorVerified] = useState(false);
@@ -716,17 +1237,19 @@ function MainApp() {
         name="Map"
         options={{
           headerShown: false,
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>🗺️</Text>,
-          title: 'Food Truck Map',
+          title: 'Map',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="map-outline" size={size} color={color} />
+          ),
         }}
       >
         {() => (
           <Stack.Navigator>
             <Stack.Screen 
             //making sure that the rest of the photo verification functions are there now
-              name="Food Truck Map" 
+              name="Map" 
               component={MapScreen} 
-              options={{ title: "Food Truck Map" }} 
+              options={{ title: "Map" }} 
             />
             <Stack.Screen 
               name="VendorPhotoVerification" 
@@ -744,10 +1267,13 @@ function MainApp() {
 
       {/* report tab */}
       <Tab.Screen
-        name="Report"
+        name="Discover"
+        component={DiscoverScreen}
         options={{
-          title: 'Report Sighting',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>📝</Text>,
+          title: 'Discover',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="star-outline" size={size} color={color} />
+          ),
         }}
       >
         {() => 
@@ -760,21 +1286,41 @@ function MainApp() {
       </Tab.Screen>
 
       {/* profile tab - double check this basically need to verify if not verified */}
+
       <Tab.Screen
         name="Profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, size }) => <Text style={{ fontSize: size, color }}>👤</Text>,
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-circle-outline" size={size} color={color} />
+          ),
         }}
-      >
-        {() => 
-          userType === 'vendor' && !vendorVerified ? (
-            <VendorBlockedScreen screenName="Profile" />
-          ) : (
-            <ProfileScreen />
-          )
-        }
-      </Tab.Screen>
+      />
+
+      <Tab.Screen
+        name="Report"
+        component={ReportScreen}
+        options={{
+          title: 'Report Sighting',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="create-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
+      
+      {isAdmin && (
+        <Tab.Screen
+          name="Dashboard"
+          component={DashboardScreen}
+          options={{
+            title: 'Dashboard',
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="stats-chart-outline" size={size} color={color} />
+            ),
+          }}
+        />
+      )}
     </Tab.Navigator>
   );
 }
@@ -782,14 +1328,94 @@ function MainApp() {
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [hasUserType, setHasUserType] = useState(false);
+  const [userId, setUserId] = useState(null);
+  const [userDoc, setUserDoc] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+
 
   useEffect(() => {
     const checkUserType = async () => {
-      const userType = await AsyncStorage.getItem("userType");
-      setHasUserType(!!userType);
-      setLoading(false);
+      try {
+        const userType = await AsyncStorage.getItem("userType");
+        setHasUserType(!!userType);
+        // also load stored userId if present
+        const storedId = await AsyncStorage.getItem('userId');
+        if (storedId) setUserId(storedId);
+        // If there's no authenticated user but we have a stored userId, try to read the users/{uid} doc as a fallback.
+        // This will only succeed if your Firestore rules allow reads without auth or allow reads for that uid.
+        try {
+          if (!auth.currentUser && storedId) {
+            const uref = doc(db, 'users', storedId);
+            const snap = await getDoc(uref);
+            if (snap.exists()) {
+              const data = snap.data();
+              setUserDoc(data);
+              const adminFlag = !!data.isAdmin;
+              setIsAdmin(adminFlag);
+            }
+          }
+        } catch (readErr) {
+          // fallback read failed; silently ignore to avoid noisy logs
+        }
+      } catch (err) {
+        // AsyncStorage error; ignore for now
+      } finally {
+        setLoading(false);
+      }
     };
     checkUserType();
+
+    // listen for auth state changes to refresh isAdmin
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      // Run async work inside an IIFE so we don't pass an async fn directly to the listener
+      (async () => {
+        try {
+          const uid = user?.uid;
+          if (!uid) {
+            setUserId(null);
+            setIsAdmin(false);
+            setUserDoc(null);
+            return;
+          }
+
+          // At this point we have a uid
+          setUserId(uid);
+          const uref = doc(db, 'users', uid);
+          const snap = await getDoc(uref);
+          const adminFlag = snap.exists() && !!snap.data().isAdmin;
+          setIsAdmin(adminFlag);
+          setUserDoc(snap.exists() ? snap.data() : null);
+        } catch (err) {
+          setIsAdmin(false);
+          setUserDoc(null);
+        }
+      })();
+    });
+
+    // Also check current user immediately in case auth state is already established
+    try {
+      const current = auth.currentUser;
+      if (current?.uid) {
+        (async () => {
+          try {
+            const curUid = current.uid;
+            const uref = doc(db, 'users', curUid);
+            const snap = await getDoc(uref);
+            const adminFlag = snap.exists() && !!snap.data().isAdmin;
+            setIsAdmin(adminFlag);
+            setUserId(curUid);
+            setUserDoc(snap.exists() ? snap.data() : null);
+          } catch (err) {
+            setUserDoc(null);
+          }
+        })();
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return () => unsubAuth();
   }, []);
 
   if (loading) {
@@ -801,12 +1427,22 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="MainApp" component={MainApp} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <ErrorBoundary>
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="MainApp">
+            {(props) => <MainApp {...props} isAdmin={isAdmin} />}
+          </Stack.Screen>
+        </Stack.Navigator>
+        {/* DEBUG badge showing current auth uid, isAdmin flag, and fetched users/{uid} doc */}
+        <View style={{ position: 'absolute', top: 36, right: 12, backgroundColor: 'rgba(0,0,0,0.82)', padding: 8, borderRadius: 8, zIndex: 999, maxWidth: 260 }}>
+          <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>Auth UID:</Text>
+          <Text style={{ color: 'white', fontSize: 11, marginBottom: 6 }}>{userId || 'none'}</Text>
+          <Text style={{ color: isAdmin ? '#4CD964' : '#FF3B30', fontWeight: '700', fontSize: 13 }}>{`admin: ${isAdmin}`}</Text>
+        </View>
+      </NavigationContainer>
+    </ErrorBoundary>
   );
 }
 
@@ -967,4 +1603,45 @@ blockedFooter: {
   color: '#999',
   fontStyle: 'italic',
 },
+
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: 'white',
+    padding: 16,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '90%',
+  },
+  statGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  statCol: { flex: 1 },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  statIcon: {
+    width: 18,
+    textAlign: 'center',
+    marginRight: 6,
+    color: '#6B7280', // gray-600
+  },
+  statText: {
+    fontSize: 12,
+    color: '#6B7280', // gray-600
+  },
+  statDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB', // gray-200
+    marginTop: 6,
+    marginBottom: 8,
+  },
 });

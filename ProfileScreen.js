@@ -60,7 +60,7 @@ function NotificationToggle({ truckId, userKey, subscribed }) {
       {loading ? (
         <ActivityIndicator color="#fff" />
       ) : (
-        <Text style={styles.notifyText}>{subscribed ? 'Stop 🔕' : 'Notify 🔔'}</Text>
+        <Text style={styles.notifyText}>{subscribed ? 'Stop' : 'Notify'}</Text>
       )}
     </TouchableOpacity>
   );
@@ -452,10 +452,16 @@ export default function ProfileScreen({ navigation }) {
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     <TouchableOpacity
                       style={styles.mapButton}
-                      onPress={() => navigation.navigate('Map', { screen: 'Food Truck Map', params: { focusTruckName: item } })}
+                      onPress={() =>
+                        navigation.navigate('Map', {
+                          screen: 'Map',                 // inner Stack.Screen name
+                          params: { focusTruckName: item },
+                        })
+                      }
                     >
-                      <Text style={styles.mapButtonText}>See on map 🗺️</Text>
+                      <Text style={styles.mapButtonText}>See on map</Text>
                     </TouchableOpacity>
+
 
                         <TouchableOpacity style={styles.unpinButton} onPress={() => unpin(item)}>
                           <Text style={styles.unpinText}>Unpin</Text>
