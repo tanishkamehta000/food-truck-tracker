@@ -44,6 +44,11 @@ import ProfileScreen from './ProfileScreen';
 import DashboardScreen from './DashboardScreen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+//readded imports
+import VendorBlockedScreen from './VendorBlockedScreen';
+import VendorPhotoVerificationScreen from './VendorPhotoVerificationScreen';
+import VendorPendingScreen from './VendorPendingScreen';
+import VerificationReminderBanner from './VerificationReminderBanner';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
