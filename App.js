@@ -1163,9 +1163,9 @@ function MainApp({ isAdmin }) {
               {({ navigation, route }) => (
                 <>
                   {/* banner on map for unverified vendors in non-blocking mode */}
-                  {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
+                  {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
                     <VerificationReminderBanner noMargin />
-                  )}
+                  ) : null}
                   <MapScreen navigation={navigation} route={route} />
                 </>
               )}
@@ -1195,20 +1195,17 @@ function MainApp({ isAdmin }) {
           ),
         }}
       >
-        {() => {
-          // blocking
+        {({ navigation, route }) => {
           if (verificationMode === 'blocking' && userType === 'vendor' && !vendorVerified) {
             return <VendorBlockedScreen screenName="Discover" />;
           }
-          // not blocking
           return (
-        <>
-        {/* banner for nonverified */}
-        {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
-          <VerificationReminderBanner />
-        )}
-        <DiscoverScreen />
-      </>
+            <>
+              {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
+                <VerificationReminderBanner />
+              ) : null}
+              <DiscoverScreen navigation={navigation} route={route} />
+            </>
           );
         }}
       </Tab.Screen>
@@ -1223,20 +1220,17 @@ function MainApp({ isAdmin }) {
           ),
         }}
       >
-        {() => {
-          // now we're in blocking here: Show blocked screen
+        {({ navigation, route }) => {
           if (verificationMode === 'blocking' && userType === 'vendor' && !vendorVerified) {
             return <VendorBlockedScreen screenName="Profile" />;
           }
-          // not blocking
           return (
-          <>
-          {/* banner for nonverified */}
-          {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
-            <VerificationReminderBanner />
-          )}
-         <ProfileScreen />
-          </>
+            <>
+              {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
+                <VerificationReminderBanner />
+              ) : null}
+              <ProfileScreen navigation={navigation} route={route} />
+            </>
           );
         }}
       </Tab.Screen>
@@ -1251,20 +1245,17 @@ function MainApp({ isAdmin }) {
           ),
         }}
       >
-        {() => {
-          // blocking agan -  if this works properly than vendors should see blocking mode for this
+        {({ navigation, route }) => {
           if (verificationMode === 'blocking' && userType === 'vendor' && !vendorVerified) {
             return <VendorBlockedScreen screenName="Report" />;
           }
-          // not blocking
           return (
-          <>
-          {/* banner for nonverified */}
-          {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
-            <VerificationReminderBanner />
-          )}
-         <ReportScreen />
-          </>
+            <>
+              {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
+                <VerificationReminderBanner />
+              ) : null}
+              <ReportScreen navigation={navigation} route={route} />
+            </>
           );
         }}
       </Tab.Screen>
