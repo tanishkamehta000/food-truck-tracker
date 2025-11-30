@@ -44,6 +44,11 @@ import ProfileScreen from './ProfileScreen';
 import DashboardScreen from './DashboardScreen';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+//readded imports
+import VendorBlockedScreen from './VendorBlockedScreen';
+import VendorPhotoVerificationScreen from './VendorPhotoVerificationScreen';
+import VendorPendingScreen from './VendorPendingScreen';
+import VerificationReminderBanner from './VerificationReminderBanner';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -1044,6 +1049,95 @@ function MapScreen({ navigation, route }) {
 }  
 
 function MainApp({ isAdmin }) {
+  const [loading, setLoading] = useState(true);
+  const [vendorVerified, setVendorVerified] = useState(false);
+  const [userType, setUserType] = useState(null);
+  const [userEmail, setUserEmail] = useState(null);
+  
+  //now have a feature flag state
+  const [verificationMode, setVerificationMode] = useState('blocking'); // just defaulting to blocking
+
+  useEffect(() => {
+    checkVendorStatus();
+    
+    // feature flag changes, real time
+    const flagRef = doc(db, 'featureFlags', 'vendorVerification');
+    const unsubscribe = onSnapshot(
+      flagRef,
+      (snap) => {
+        if (snap.exists()) {
+          const mode = snap.data().mode || 'blocking';
+          setVerificationMode(mode);
+          console.log('Feature flag updated:', mode);
+        } else {
+          // if flag doesn't exist we need to go back to blocking
+          setVerificationMode('blocking');
+        }
+      },
+      (err) => {
+        console.error('Feature flag listener error:', err);
+        setVerificationMode('blocking');
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const checkVendorStatus = async () => {
+    try {
+      const type = await AsyncStorage.getItem('userType');
+      const email = await AsyncStorage.getItem('userEmail');
+      
+      setUserType(type);
+      setUserEmail(email);
+
+      // only need to check for vendors
+      if (type !== 'vendor') {
+        setVendorVerified(true);
+        setLoading(false);
+        return;
+      }
+
+      // checking vendor status
+      if (!email) {
+        setLoading(false);
+        return;
+      }
+
+      const vendorRef = doc(db, 'vendors', email);
+      const vendorDoc = await getDoc(vendorRef);
+      
+      if (!vendorDoc.exists()) {
+        // if no profile exists need to apply
+        setVendorVerified(false);
+        setLoading(false);
+        return;
+      }
+
+      const vendorData = vendorDoc.data();
+      const status = vendorData.verificationStatus;
+
+      if (status === 'approved') {
+        setVendorVerified(true);
+      } else {
+        setVendorVerified(false);
+      }
+
+      setLoading(false);
+    } catch (error) {
+      console.error('Error checking vendor status:', error);
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -1052,6 +1146,7 @@ function MainApp({ isAdmin }) {
         tabBarStyle: { paddingVertical: 5, backgroundColor: 'white' },
       }}
     >
+      {/* map tab should always be accessible - need to double check*/}
       <Tab.Screen
         name="Map"
         options={{
@@ -1064,45 +1159,108 @@ function MainApp({ isAdmin }) {
       >
         {() => (
           <Stack.Navigator>
-            <Stack.Screen name="Map" component={MapScreen} options={{ title: "Map" }} />
+            <Stack.Screen name="Map">
+              {({ navigation, route }) => (
+                <>
+                  {/* banner on map for unverified vendors in non-blocking mode */}
+                  {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
+                    <VerificationReminderBanner noMargin />
+                  ) : null}
+                  <MapScreen navigation={navigation} route={route} />
+                </>
+              )}
+            </Stack.Screen>
+
+            <Stack.Screen 
+              name="VendorPhotoVerification" 
+              component={VendorPhotoVerificationScreen} 
+              options={{ title: 'Vendor Verification' }} 
+            />
+            <Stack.Screen 
+              name="VendorPendingScreen" 
+              component={VendorPendingScreen} 
+              options={{ title: 'Verification Pending', headerLeft: () => null }} 
+            />
           </Stack.Navigator>
         )}
       </Tab.Screen>
 
+      {/* discover tab */}
       <Tab.Screen
         name="Discover"
-        component={DiscoverScreen}
         options={{
           title: 'Discover',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="star-outline" size={size} color={color} />
           ),
         }}
-      />
+      >
+        {({ navigation, route }) => {
+          if (verificationMode === 'blocking' && userType === 'vendor' && !vendorVerified) {
+            return <VendorBlockedScreen screenName="Discover" />;
+          }
+          return (
+            <>
+              {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
+                <VerificationReminderBanner />
+              ) : null}
+              <DiscoverScreen navigation={navigation} route={route} />
+            </>
+          );
+        }}
+      </Tab.Screen>
 
+      {/* profile tab */}
       <Tab.Screen
         name="Profile"
-        component={ProfileScreen}
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person-circle-outline" size={size} color={color} />
           ),
         }}
-      />
+      >
+        {({ navigation, route }) => {
+          if (verificationMode === 'blocking' && userType === 'vendor' && !vendorVerified) {
+            return <VendorBlockedScreen screenName="Profile" />;
+          }
+          return (
+            <>
+              {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
+                <VerificationReminderBanner />
+              ) : null}
+              <ProfileScreen navigation={navigation} route={route} />
+            </>
+          );
+        }}
+      </Tab.Screen>
 
+      {/* based on feature flag we'll be in either blocking or nonblocking mode */}
       <Tab.Screen
         name="Report"
-        component={ReportScreen}
         options={{
           title: 'Report Sighting',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="create-outline" size={size} color={color} />
           ),
         }}
-      />
+      >
+        {({ navigation, route }) => {
+          if (verificationMode === 'blocking' && userType === 'vendor' && !vendorVerified) {
+            return <VendorBlockedScreen screenName="Report" />;
+          }
+          return (
+            <>
+              {(verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified) ? (
+                <VerificationReminderBanner />
+              ) : null}
+              <ReportScreen navigation={navigation} route={route} />
+            </>
+          );
+        }}
+      </Tab.Screen>
 
-      
+      {/* dashboard tab for admins*/}
       {isAdmin && (
         <Tab.Screen
           name="Dashboard"
@@ -1136,8 +1294,6 @@ export default function App() {
         // also load stored userId if present
         const storedId = await AsyncStorage.getItem('userId');
         if (storedId) setUserId(storedId);
-        // If there's no authenticated user but we have a stored userId, try to read the users/{uid} doc as a fallback.
-        // This will only succeed if your Firestore rules allow reads without auth or allow reads for that uid.
         try {
           if (!auth.currentUser && storedId) {
             const uref = doc(db, 'users', storedId);
@@ -1150,19 +1306,15 @@ export default function App() {
             }
           }
         } catch (readErr) {
-          // fallback read failed; silently ignore to avoid noisy logs
         }
       } catch (err) {
-        // AsyncStorage error; ignore for now
       } finally {
         setLoading(false);
       }
     };
     checkUserType();
 
-    // listen for auth state changes to refresh isAdmin
     const unsubAuth = onAuthStateChanged(auth, (user) => {
-      // Run async work inside an IIFE so we don't pass an async fn directly to the listener
       (async () => {
         try {
           const uid = user?.uid;
@@ -1173,11 +1325,18 @@ export default function App() {
             return;
           }
 
-          // At this point we have a uid
           setUserId(uid);
           const uref = doc(db, 'users', uid);
           const snap = await getDoc(uref);
+
+          console.log('📄 User doc exists:', snap.exists());
+          console.log('📄 User doc data:', snap.data());
+          console.log('📄 isAdmin field value:', snap.data()?.isAdmin);
+          console.log('📄 isAdmin type:', typeof snap.data()?.isAdmin);
+
           const adminFlag = snap.exists() && !!snap.data().isAdmin;
+          console.log('📄 Final admin flag:', adminFlag);
+
           setIsAdmin(adminFlag);
           setUserDoc(snap.exists() ? snap.data() : null);
         } catch (err) {
@@ -1187,7 +1346,6 @@ export default function App() {
       })();
     });
 
-    // Also check current user immediately in case auth state is already established
     try {
       const current = auth.currentUser;
       if (current?.uid) {
@@ -1229,7 +1387,7 @@ export default function App() {
             {(props) => <MainApp {...props} isAdmin={isAdmin} />}
           </Stack.Screen>
         </Stack.Navigator>
-        {/* DEBUG badge showing current auth uid, isAdmin flag, and fetched users/{uid} doc */}
+        {/* debugging badge showing current auth uid, isAdmin flag, and fetched users/{uid} doc */}
         <View style={{ position: 'absolute', top: 36, right: 12, backgroundColor: 'rgba(0,0,0,0.82)', padding: 8, borderRadius: 8, zIndex: 999, maxWidth: 260 }}>
           <Text style={{ color: 'white', fontSize: 12, fontWeight: '700' }}>Auth UID:</Text>
           <Text style={{ color: 'white', fontSize: 11, marginBottom: 6 }}>{userId || 'none'}</Text>
