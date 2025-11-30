@@ -1,0 +1,31 @@
+name: Compute Admin Metrics (auth-mode)
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # daily at 08:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  compute-metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit --progress=false
+
+      - name: Run compute metrics (auth user)
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_ADMIN_EMAIL: ${{ secrets.FIREBASE_ADMIN_EMAIL }}
+          FIREBASE_ADMIN_PASSWORD: ${{ secrets.FIREBASE_ADMIN_PASSWORD }}
+        run: |
+          node scripts/computeMetricsAuth.js

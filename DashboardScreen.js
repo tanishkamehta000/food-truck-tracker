@@ -9,6 +9,7 @@ export default function DashboardScreen({ navigation }) {
   const [error, setError] = useState(null);
   const [docs, setDocs] = useState([]);
   const [metrics, setMetrics] = useState(null);
+  const [cachedMetrics, setCachedMetrics] = useState(null);
   
   //now have a new thing for feature flags (just for now since we actually have another dashboard that we ended up using for tracking
   const [verificationMode, setVerificationMode] = useState('blocking');
@@ -22,7 +23,23 @@ export default function DashboardScreen({ navigation }) {
     }
     fetchUsers();
     loadFeatureFlag();
+    fetchCachedMetrics();
   }, []);
+
+  const fetchCachedMetrics = async () => {
+    try {
+      const ref = doc(db, 'adminCache', 'metrics');
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data = snap.data() || {};
+        setCachedMetrics(data);
+      } else {
+        setCachedMetrics(null);
+      }
+    } catch (err) {
+      console.error('Failed to load cached metrics', err);
+    }
+  };
 
   const loadFeatureFlag = async () => {
     try {
@@ -358,25 +375,50 @@ export default function DashboardScreen({ navigation }) {
         </TouchableOpacity>
 
         <TouchableOpacity onPress={computeMetrics} style={[styles.refreshButton, { marginTop: 10, backgroundColor: '#34A853' }] }>
-          <Text style={styles.refreshButtonText}>Compute Metrics</Text>
+          <Text style={styles.refreshButtonText}>Get Metrics</Text>
         </TouchableOpacity>
 
-        {metrics && (
+        {(metrics || cachedMetrics) && (
           <View style={{ marginTop: 12, padding: 12, backgroundColor: '#fff', borderRadius: 8 }}>
-            <Text style={{ fontWeight: '700', marginBottom: 8 }}>Computed Metrics</Text>
-            <Text>Avg pinned trucks per person: {metrics.avgPinnedPerPerson.toFixed ? metrics.avgPinnedPerPerson.toFixed(2) : String(metrics.avgPinnedPerPerson)}</Text>
-            <Text>Total reports: {metrics.totalReports}</Text>
-            <Text>Avg reports per reporting user: {metrics.avgReportsPerUser.toFixed ? metrics.avgReportsPerUser.toFixed(2) : String(metrics.avgReportsPerUser)}</Text>
-            <Text>Avg issues reported: {metrics.avgIssuesReported.toFixed ? metrics.avgIssuesReported.toFixed(2) : String(metrics.avgIssuesReported)}</Text>
-            <Text>Avg issues per truck: {metrics.avgIssuesPerTruck.toFixed ? metrics.avgIssuesPerTruck.toFixed(2) : String(metrics.avgIssuesPerTruck)}</Text>
-            <Text style={{ marginTop: 8, fontWeight: '700' }}>Top trucks this week:</Text>
-            {metrics.topTrucksThisWeek.length === 0 ? <Text style={{ color: '#666' }}>No reports this week</Text> : metrics.topTrucksThisWeek.map(t => (
-              <Text key={t.name}>{t.name} — {t.count}</Text>
-            ))}
+            <Text style={{ fontWeight: '700', marginBottom: 8 }}>Computed Metrics {cachedMetrics ? '(cached)' : ''}</Text>
+            {cachedMetrics && (
+              <Text style={{ color: '#666', marginBottom: 8 }}>Last computed: {cachedMetrics.lastUpdated && cachedMetrics.lastUpdated.toDate ? cachedMetrics.lastUpdated.toDate().toLocaleString() : (cachedMetrics.computedAt || 'unknown')}</Text>
+            )}
+            {(() => {
+              const display = cachedMetrics || metrics;
+              if (!display) return null;
+              return (
+                <>
+                  <Text>Avg pinned trucks per person: {display.avgPinnedPerPerson != null && display.avgPinnedPerPerson.toFixed ? display.avgPinnedPerPerson.toFixed(2) : String(display.avgPinnedPerPerson)}</Text>
+                  <Text>Total reports: {display.totalReports}</Text>
+                  <Text>Avg reports per reporting user: {display.avgReportsPerUser != null && display.avgReportsPerUser.toFixed ? display.avgReportsPerUser.toFixed(2) : String(display.avgReportsPerUser)}</Text>
+                  <Text>Avg issues reported: {display.avgIssuesReported != null && display.avgIssuesReported.toFixed ? display.avgIssuesReported.toFixed(2) : String(display.avgIssuesReported)}</Text>
+                  <Text>Avg issues per truck: {display.avgIssuesPerTruck != null && display.avgIssuesPerTruck.toFixed ? display.avgIssuesPerTruck.toFixed(2) : String(display.avgIssuesPerTruck)}</Text>
+                  <Text style={{ marginTop: 8, fontWeight: '700' }}>Top trucks this week:</Text>
+                  {(!display.topTrucksThisWeek || display.topTrucksThisWeek.length === 0) ? <Text style={{ color: '#666' }}>No reports this week</Text> : display.topTrucksThisWeek.map(t => (
+                    <Text key={t.name}>{t.name} — {t.count}</Text>
+                  ))}
+                </>
+              );
+            })()}
 
-            <Text style={{ marginTop: 8 }}>Avg reports/day per vendor (last 7 days): {metrics.perVendorPerDay.toFixed ? metrics.perVendorPerDay.toFixed(2) : String(metrics.perVendorPerDay)}</Text>
-            <Text>Top favorite vendor this week: {metrics.topFavoriteVendorThisWeek ? `${metrics.topFavoriteVendorThisWeek.name} (${metrics.topFavoriteVendorThisWeek.rating})` : 'N/A'}</Text>
-            <Text>Avg rating per truck: {metrics.avgRatingPerTruck != null ? metrics.avgRatingPerTruck.toFixed(2) : 'N/A'}</Text>
+            {/** prefer cachedMetrics if present */}
+            {(() => {
+              const display = cachedMetrics || metrics;
+              return (
+                <>
+                  <Text style={{ marginTop: 8 }}>Avg reports/day per vendor (last 7 days): {display.perVendorPerDay != null && display.perVendorPerDay.toFixed ? display.perVendorPerDay.toFixed(2) : String(display.perVendorPerDay)}</Text>
+                  <Text>Top favorite vendor this week: {display.topFavoriteVendorThisWeek ? `${display.topFavoriteVendorThisWeek.name} (${display.topFavoriteVendorThisWeek.rating})` : 'N/A'}</Text>
+                  <Text>Avg rating per truck: {display.avgRatingPerTruck != null ? display.avgRatingPerTruck.toFixed(2) : 'N/A'}</Text>
+                </>
+              );
+            })()}
+            <View style={{ marginTop: 8, flexDirection: 'row' }}>
+              <TouchableOpacity onPress={fetchCachedMetrics} style={[styles.refreshButton, { marginRight: 8, backgroundColor: '#007AFF' }]}>
+                <Text style={styles.refreshButtonText}>Refresh Cached</Text>
+              </TouchableOpacity>
+  
+            </View>
           </View>
         )}
       </View>

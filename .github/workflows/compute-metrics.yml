@@ -1,0 +1,45 @@
+name: Compute Admin Metrics
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # daily at 08:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  compute-metrics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Write service account
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
+        run: |
+          echo "$FIREBASE_SERVICE_ACCOUNT" > $GITHUB_WORKSPACE/serviceAccount.json
+          echo "SERVICE ACCOUNT written"
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Set GOOGLE_APPLICATION_CREDENTIALS
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/serviceAccount.json" ]; then
+            echo "Using serviceAccount.json"
+            echo "##[set-env name=GOOGLE_APPLICATION_CREDENTIALS]$GITHUB_WORKSPACE/serviceAccount.json"
+            export GOOGLE_APPLICATION_CREDENTIALS=$GITHUB_WORKSPACE/serviceAccount.json
+          else
+            echo "No serviceAccount.json found; ensure secret FIREBASE_SERVICE_ACCOUNT is configured"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci --prefer-offline --no-audit --progress=false
+
+      - name: Run compute metrics script
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/serviceAccount.json
+        run: npm run compute-metrics-admin
