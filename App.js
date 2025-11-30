@@ -1160,16 +1160,17 @@ function MainApp({ isAdmin }) {
         {() => (
           <Stack.Navigator>
             <Stack.Screen name="Map">
-              {() => (
+              {({ navigation, route }) => (
                 <>
                   {/* banner on map for unverified vendors in non-blocking mode */}
                   {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
                     <VerificationReminderBanner noMargin />
                   )}
-                  <MapScreen />
+                  <MapScreen navigation={navigation} route={route} />
                 </>
               )}
             </Stack.Screen>
+
             <Stack.Screen 
               name="VendorPhotoVerification" 
               component={VendorPhotoVerificationScreen} 

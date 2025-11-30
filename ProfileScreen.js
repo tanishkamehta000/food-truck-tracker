@@ -111,27 +111,40 @@ export default function ProfileScreen({ navigation }) {
   }, []);
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (err) {
-      console.warn('signOut error', err);
-      // continue to clear local storage even if signOut fails
-    }
+      // clearing async first
+      try {
+        await AsyncStorage.removeItem('userType');
+        await AsyncStorage.removeItem('userEmail');
+        await AsyncStorage.removeItem('userId');
+      } catch (err) {
+        console.warn('AsyncStorage clear error', err);
+      }
 
-    try {
-      await AsyncStorage.removeItem('userType');
-      await AsyncStorage.removeItem('userEmail');
-      await AsyncStorage.removeItem('userId');
-    } catch (err) {
-      console.warn('AsyncStorage clear error', err);
-    }
+      // seeing what's happening
+      try {
+        await signOut(auth);
+      } catch (err) {
+        console.warn('signOut error', err);
+        // Continue anyway - local storage is already cleared
+      }
 
-    try {
-      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
-    } catch (err) {
-      navigation.navigate('Login');
-    }
-  };
+    //trying
+      try {
+        navigation.reset({ 
+          index: 0, 
+          routes: [{ name: 'Login' }] 
+        });
+      } catch (err) {
+        console.warn('navigation reset error', err);
+        // fallback to simple navigate
+        try {
+          navigation.navigate('Login');
+        } catch (e) {
+          console.error('All navigation attempts failed', e);
+          Alert.alert('Logged Out', 'Please close and reopen the app.');
+        }
+      }
+    };
 
   useEffect(() => {
     if (!userType) return;
@@ -155,24 +168,35 @@ export default function ProfileScreen({ navigation }) {
     }
 
     if (userType === 'vendor') {
-      const ref = doc(db, 'vendors', docKey);
-      const unsub = onSnapshot(ref, (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          // Ensure prices are numbers rounded to 2 decimals
-          const normalized = (data.menu || []).map((it) => {
-            const price = Number(it.price);
-            return { ...it, price: Number.isFinite(price) ? Math.round(price * 100) / 100 : 0 };
-          });
-          setMenuItems(normalized);
-          if (data.cuisine) setCuisine(data.cuisine);
-        } else {
-          setMenuItems([]);
-        }
-      }, (err) => console.error('vendors onSnapshot error', err));
-
-      return () => unsub();
-    }
+        const ref = doc(db, 'vendors', docKey);
+        const unsub = onSnapshot(
+          ref, 
+          (snap) => {
+            if (snap.exists()) {
+              const data = snap.data();
+              // Ensure prices are numbers rounded to 2 decimals
+              const normalized = (data.menu || []).map((it) => {
+                const price = Number(it.price);
+                return { ...it, price: Number.isFinite(price) ? Math.round(price * 100) / 100 : 0 };
+              });
+              setMenuItems(normalized);
+              if (data.cuisine) setCuisine(data.cuisine);
+            } else {
+              setMenuItems([]);
+            }
+          }, 
+          (err) => {
+            //handle permission errors (user might not have vendor profile yet)
+            if (err.code === 'permission-denied') {
+              console.log('Vendor profile not accessible yet (normal for new vendors)');
+              setMenuItems([]);
+            } else {
+              console.error('vendors onSnapshot error', err);
+            }
+          }
+        );
+        return () => unsub();
+      }
   }, [userId, userEmail, userType]);
 
   
