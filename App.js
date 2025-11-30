@@ -1328,7 +1328,15 @@ export default function App() {
           setUserId(uid);
           const uref = doc(db, 'users', uid);
           const snap = await getDoc(uref);
+
+          console.log('📄 User doc exists:', snap.exists());
+          console.log('📄 User doc data:', snap.data());
+          console.log('📄 isAdmin field value:', snap.data()?.isAdmin);
+          console.log('📄 isAdmin type:', typeof snap.data()?.isAdmin);
+
           const adminFlag = snap.exists() && !!snap.data().isAdmin;
+          console.log('📄 Final admin flag:', adminFlag);
+
           setIsAdmin(adminFlag);
           setUserDoc(snap.exists() ? snap.data() : null);
         } catch (err) {
