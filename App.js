@@ -1146,7 +1146,7 @@ function MainApp({ isAdmin }) {
         tabBarStyle: { paddingVertical: 5, backgroundColor: 'white' },
       }}
     >
-      {/* map tab should always be accessible - need to double check with Tanishka and Alvin */}
+      {/* map tab should always be accessible - need to double check*/}
       <Tab.Screen
         name="Map"
         options={{
@@ -1159,11 +1159,17 @@ function MainApp({ isAdmin }) {
       >
         {() => (
           <Stack.Navigator>
-            <Stack.Screen 
-              name="Map" 
-              component={MapScreen} 
-              options={{ title: "Map" }} 
-            />
+            <Stack.Screen name="Map">
+              {() => (
+                <>
+                  {/* banner on map for unverified vendors in non-blocking mode */}
+                  {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
+                    <VerificationReminderBanner noMargin />
+                  )}
+                  <MapScreen />
+                </>
+              )}
+            </Stack.Screen>
             <Stack.Screen 
               name="VendorPhotoVerification" 
               component={VendorPhotoVerificationScreen} 
@@ -1194,7 +1200,15 @@ function MainApp({ isAdmin }) {
             return <VendorBlockedScreen screenName="Discover" />;
           }
           // not blocking
-          return <DiscoverScreen />;
+          return (
+        <>
+        {/* banner for nonverified */}
+        {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
+          <VerificationReminderBanner />
+        )}
+        <DiscoverScreen />
+      </>
+          );
         }}
       </Tab.Screen>
 
@@ -1213,8 +1227,16 @@ function MainApp({ isAdmin }) {
           if (verificationMode === 'blocking' && userType === 'vendor' && !vendorVerified) {
             return <VendorBlockedScreen screenName="Profile" />;
           }
-          // if verified or non blocked we show regular screen
-          return <ProfileScreen />;
+          // not blocking
+          return (
+          <>
+          {/* banner for nonverified */}
+          {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
+            <VerificationReminderBanner />
+          )}
+         <ProfileScreen />
+          </>
+          );
         }}
       </Tab.Screen>
 
@@ -1233,8 +1255,16 @@ function MainApp({ isAdmin }) {
           if (verificationMode === 'blocking' && userType === 'vendor' && !vendorVerified) {
             return <VendorBlockedScreen screenName="Report" />;
           }
-          // if its not on blocking mode we can just show this as normal
-          return <ReportScreen />;
+          // not blocking
+          return (
+          <>
+          {/* banner for nonverified */}
+          {verificationMode === 'non-blocking' && userType === 'vendor' && !vendorVerified && (
+            <VerificationReminderBanner />
+          )}
+         <ReportScreen />
+          </>
+          );
         }}
       </Tab.Screen>
 
